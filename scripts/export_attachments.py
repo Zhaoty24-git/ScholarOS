@@ -229,14 +229,15 @@ def build_learn_candidates(
     )
 
 
-def should_include_homework(record: dict) -> bool:
+def should_include_homework(record: dict, *, now: datetime | None = None) -> bool:
     status = str(record.get("status") or "").lower()
     if status in {"graded", "submitted_ungraded", "submitted", "submitted_graded"}:
         return False
     if record.get("completed") is True:
         return False
     ddl = parse_time(record.get("ddl"))
-    if ddl is not None and ddl < datetime.now(ddl.tzinfo):
+    current = now or datetime.now(ddl.tzinfo if ddl is not None else None)
+    if ddl is not None and ddl < current:
         return False
     return True
 

@@ -1,6 +1,6 @@
 # 模块接口契约
 
-本文档定义 E 模块集成 A/B/C/D 的第一版稳定接口。已有接口直接接入；未完成接口由 E 先按本文档提供 Mock，后续由对应模块替换真实实现。
+本文档定义 E 模块集成 A/B/C/D 的稳定接口。各模块通过 adapter 接入，数据或配置缺失时统一返回 `missing`、`blocked` 或 `demo` 状态。
 
 ## 接口状态表
 
@@ -9,7 +9,7 @@
 | A | 已有采集 CLI、Pydantic 模型、JSONL 输出 | 读取 `CourseTask`、`ScheduleItem`、同步状态并适配为前端 API | 稳定任务中心结构，补同步状态与错误码 |
 | B | 已有资料解析脚本、`MaterialChunk` 输出 | 读取资料分块、解析状态、失败原因并适配为前端 API | 稳定标准化资料输出，补解析失败原因 |
 | C | 已有 `src/knowledge/` 知识库核心、关键词/向量/混合检索 | 通过 `ModuleCAdapter` 读取真实知识库索引，返回检索结果 | 向量模型优化、增量更新、检索评测调优 |
-| D | 未完成或不稳定 | E 提供问答、总结、作业助手 Mock | 实现问答、引用溯源、总结、作业助手 |
+| D | 已有真实 LLM pipeline | 通过 `ModuleDAdapter` 调用 A/C 检索并生成问答、总结、作业辅导 | 继续优化提示词、评测和成本控制 |
 
 ## 通用响应
 
@@ -48,7 +48,7 @@
     "A": "ready",
     "B": "ready",
     "C": "ready",
-    "D": "mock",
+    "D": "ready",
     "E": "ready"
   }
 }
@@ -260,7 +260,7 @@ C 模块检索接口。
     }
   ],
   "source_module": "C",
-  "status": "mock"
+  "status": "ready"
 }
 ```
 
@@ -281,10 +281,10 @@ D 模块课程问答接口。
 
 ```json
 {
-  "answer": "这是 Mock 回答，真实实现由 D 模块提供。",
-  "citations": [],
+  "answer": "根据作业要求和相关课件，这次作业需要先明确问题范围，再结合课程知识完成分析。",
+  "citations": [{"title": "课程资料", "source": "knowledge_base", "snippet": "相关片段"}],
   "source_module": "D",
-  "status": "mock"
+  "status": "ready"
 }
 ```
 
@@ -321,9 +321,11 @@ D 模块作业助手接口。
 {
   "task_id": "learn_homework_1",
   "outline": ["理解题目", "召回相关知识", "形成解题步骤"],
-  "draft": "这是 Mock 草稿，真实实现由 D 模块提供。",
-  "citations": [],
+  "draft": "先阅读作业要求，确认输入输出和评分点，再根据检索到的课件内容形成解题步骤。",
+  "pitfalls": ["不要直接复制答案，先验证题目约束。"],
+  "checklist": ["是否覆盖题目要求", "是否引用了相关课程知识"],
+  "citations": [{"title": "作业说明", "source": "tasks", "snippet": "作业要求片段"}],
   "source_module": "D",
-  "status": "mock"
+  "status": "ready"
 }
 ```

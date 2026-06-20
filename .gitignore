@@ -17,7 +17,9 @@ storage/*session*.json
 storage/*trust*.json
 storage/*cookie*.json
 storage/*cookies*.json
+storage/sync_job_state.json
 logs/*.log
+logs/sync_jobs/
 node_modules/
 frontend/node_modules/
 frontend/dist/

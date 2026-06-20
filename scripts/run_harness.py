@@ -320,7 +320,7 @@ def check_learn_semester_filter_contract() -> list[str]:
     errors: list[str] = []
     try:
         from main import filter_learn_records_for_semester
-        from scripts.export_attachments import is_material_candidate
+        from scripts.export_attachments import should_include_homework
         from src.models import CourseTask
     except Exception as exc:
         return [f"Learn semester filter import failed: {exc}"]
@@ -382,11 +382,21 @@ def check_learn_semester_filter_contract() -> list[str]:
     if raw_ids != {"overdue-unsubmitted", "future-completed"}:
         errors.append(f"unexpected Learn semester homework filter result: {sorted(raw_ids)}")
 
-    candidate = future_completed.model_dump(mode="json", exclude_none=True)
-    if not is_material_candidate(candidate, semester_start=semester_start, now=now):
-        errors.append("future-DDL homework was excluded from material export")
+    future_unsubmitted = homework(
+        "future-unsubmitted",
+        datetime(2026, 6, 20, tzinfo=timezone),
+        completed=False,
+        status="unsubmitted",
+    )
+
+    candidate = future_unsubmitted.model_dump(mode="json", exclude_none=True)
+    if not should_include_homework(candidate, now=now):
+        errors.append("future unsubmitted homework was excluded from optional material export")
+    submitted_candidate = future_completed.model_dump(mode="json", exclude_none=True)
+    if should_include_homework(submitted_candidate, now=now):
+        errors.append("submitted homework was included in optional material export")
     old_candidate = old_homework.model_dump(mode="json", exclude_none=True)
-    if is_material_candidate(old_candidate, semester_start=semester_start, now=now):
+    if should_include_homework(old_candidate, now=now):
         errors.append("pre-semester homework was included in material export")
     return errors
 
