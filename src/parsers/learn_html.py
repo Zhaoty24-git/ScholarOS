@@ -425,6 +425,14 @@ def find_deadline_text(content: str) -> str | None:
 def parse_datetime_hint(value: str | None) -> datetime | None:
     if not value:
         return None
+    value = value.strip()
+    # Preserve explicit ISO offsets and seconds instead of matching date-only.
+    if "T" in value or re.search(r"(?:Z|[+-]\d{2}:\d{2})$", value):
+        try:
+            parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            return None
+        return parsed if parsed.tzinfo else parsed.replace(tzinfo=LOCAL_TIMEZONE)
     normalized = (
         value.strip()
         .replace("年", "-")

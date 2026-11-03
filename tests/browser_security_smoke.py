@@ -3,6 +3,7 @@
 Run after frontend build: python tests/browser_security_smoke.py
 Uses installed Chromium and websockets (already provided by uvicorn[standard]).
 """
+import argparse
 import asyncio
 import http.server
 import json
@@ -21,6 +22,7 @@ FIXTURE_TOKEN = "".join(["synthetic-browser-", "x" * 40])
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
+    static_root = ROOT / "frontend/dist"
     revoked = False
     api_calls = 0
     def log_message(self, *args): pass
@@ -34,8 +36,8 @@ class Fixture(http.server.BaseHTTPRequestHandler):
             self.wfile.write(json.dumps({"status": "ready", "fields": {}, "items": [], "stats": {}}).encode())
             return
         relative = self.path.split("?", 1)[0].removeprefix("/app/")
-        file = (ROOT / "frontend/dist" / (relative or "index.html")).resolve()
-        if not file.is_relative_to(ROOT / "frontend/dist") or not file.is_file():
+        file = (type(self).static_root / (relative or "index.html")).resolve()
+        if not file.is_relative_to(type(self).static_root) or not file.is_file():
             self.send_error(404)
             return
         self.send_response(200)
@@ -99,9 +101,14 @@ async def exercise(ws_url, origin):
 
 
 def main():
-    chromium = shutil.which("chromium")
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--dist", type=Path, default=ROOT / "frontend/dist")
+    args = parser.parse_args()
+    Fixture.static_root = args.dist.resolve()
+    chromium = next((path for name in ("chromium", "google-chrome", "google-chrome-stable", "chromium-browser") if (path := shutil.which(name))), None)
     if not chromium: raise RuntimeError("Chromium required; browser checks were not run")
-    if not (ROOT / "frontend/dist/index.html").exists(): raise RuntimeError("Build frontend first")
+    if not (Fixture.static_root / "index.html").exists(): raise RuntimeError("Build frontend first")
+    print("browser_version=" + subprocess.check_output([chromium, "--version"], text=True).strip())
     server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
     thread = threading.Thread(target=server.serve_forever, daemon=True)
     thread.start()

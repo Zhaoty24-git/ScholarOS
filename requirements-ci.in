@@ -1,0 +1,19 @@
+# Direct dependencies for the selected offline workflow, observed in the tested
+# development environment. Optional GPU/embedding/ASR models are not a CI target.
+fastapi==0.162.0
+pydantic==2.14.2
+python-dotenv==1.2.4
+requests==2.34.2
+pypdf==5.9.0
+python-docx==1.2.0
+python-pptx==1.0.2
+pillow==12.3.0
+pytesseract==0.3.13
+python-multipart==0.0.33
+jieba==0.42.1
+openai==2.54.0
+numpy==2.5.4
+uvicorn==0.54.0
+httpx==0.28.1
+websockets==17.4
+PyYAML==6.0.3
