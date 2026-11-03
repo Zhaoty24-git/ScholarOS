@@ -16,6 +16,10 @@ class AndroidContractTests(unittest.TestCase):
         tree = 'A: android:minSdkVersion(0x0101020c)=(type 0x10)0x18\nA: android:targetSdkVersion(0x01010270)=(type 0x10)0x24'
         self.assertEqual(verify_sdk(tree), {"minSdkVersion": 24, "targetSdkVersion": 36})
 
+    def test_sdk36_full_namespace_and_decimal_output_decoded(self):
+        tree = 'A: http://schemas.android.com/apk/res/android:minSdkVersion(0x0101020c)=24\nA: http://schemas.android.com/apk/res/android:targetSdkVersion(0x01010270)=36'
+        self.assertEqual(verify_sdk(tree), {"minSdkVersion": 24, "targetSdkVersion": 36})
+
     def test_wrong_compiled_sdk_rejected(self):
         tree = 'A: android:minSdkVersion(0x0101020c)=(type 0x10)0x18\nA: android:targetSdkVersion(0x01010270)=(type 0x10)0x23'
         with self.assertRaises(ValueError): verify_sdk(tree)
@@ -24,17 +28,29 @@ class AndroidContractTests(unittest.TestCase):
         with self.assertRaises(ValueError): verify_sdk('E: manifest')
 
     def test_actual_system_network_permission_rejected(self):
-        with self.assertRaises(ValueError): verify_permissions("uses-permission: name='android.permission.INTERNET'", "")
+        tree = 'E: uses-permission (line=1)\n  A: http://schemas.android.com/apk/res/android:name(0x01010003)="android.permission.INTERNET"'
+        with self.assertRaises(ValueError): verify_permissions(tree)
 
     def test_androidx_private_signature_permission_accepted(self):
         name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tree = 'E: permission (line=18)\n  A: android:name="' + name + '"\n  A: android:protectionLevel=(type 0x11)0x2\nE: application'
-        self.assertEqual(verify_permissions("uses-permission: name='" + name + "'", tree), [name])
+        tree += '\nE: uses-permission (line=21)\n  A: android:name="' + name + '"'
+        self.assertEqual(verify_permissions(tree), [name])
+
+    def test_sdk36_private_permission_format_decoded(self):
+        name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        prefix = 'A: http://schemas.android.com/apk/res/android:'
+        tree = 'E: permission (line=18)\n  ' + prefix + 'name(0x01010003)="' + name + '" (Raw: "' + name + '")\n  ' + prefix + 'protectionLevel(0x01010009)=0x00000002\nE: uses-permission (line=21)\n  ' + prefix + 'name(0x01010003)="' + name + '"'
+        self.assertEqual(verify_permissions(tree), [name])
+
+    def test_unparseable_permission_is_rejected(self):
+        with self.assertRaises(ValueError): verify_permissions('E: uses-permission (line=1)\n A: unsupported:name="android.permission.INTERNET"')
 
     def test_androidx_permission_without_signature_rejected(self):
         name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
         tree = 'E: permission (line=18)\n  A: android:name="' + name + '"\n  A: android:protectionLevel=(type 0x11)0x0'
-        with self.assertRaises(ValueError): verify_permissions("uses-permission: name='" + name + "'", tree)
+        tree += '\nE: uses-permission (line=21)\n  A: android:name="' + name + '"'
+        with self.assertRaises(ValueError): verify_permissions(tree)
 
     def test_manifest_has_no_permissions_and_real_launcher(self):
         manifest = ET.parse(ROOT / "frontend/android/app/src/main/AndroidManifest.xml").getroot()

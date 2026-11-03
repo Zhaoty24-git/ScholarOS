@@ -13,15 +13,40 @@ import subprocess
 import zipfile
 
 
-def verify_permissions(badging, tree):
-    permissions = sorted(set(re.findall(r"uses-permission[^:]*: name='([^']+)'", badging)))
+def android_attribute(tree, field):
+    # SDK 36 aapt2 prints full namespace URIs and plain decimals; older aapt2
+    # prints android: aliases and typed hex values. Read both without defaults.
+    match = re.search(r"A:\s+(?:android:|http://schemas\.android\.com/apk/res/android:)" +
+                      field + r"(?:\([^\n)]+\))?=\s*(?:\(type [^)]+\))?([^\n]+)", tree)
+    return match.group(1).strip() if match else None
+
+
+def numeric_attribute(tree, field):
+    raw = android_attribute(tree, field)
+    if raw is None: return None
+    try: return int(raw, 0)
+    except ValueError: return None
+
+
+def verify_permissions(tree):
+    elements = []
+    for block in re.split(r"\n(?=\s*E:)", tree):
+        element = re.match(r"\s*E:\s*([\w-]+)\b", block)
+        if element: elements.append((element.group(1), block))
+    permissions = []
+    for element, block in elements:
+        if not element.startswith("uses-permission"): continue
+        raw = android_attribute(block, "name")
+        name = re.match(r'^"([^"\n]+)"', raw or "")
+        if not name: raise ValueError("Unparseable compiled permission name")
+        permissions.append(name.group(1))
+    permissions = sorted(set(permissions))
     internal = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
     if set(permissions) - {internal}:
         raise ValueError("Unexpected offline APK permissions: " + ", ".join(permissions))
     if internal in permissions:
-        blocks = re.split(r"\n(?=\s*E:)", tree)
-        if not any("E: permission " in block and internal in block and
-                   re.search(r"android:protectionLevel[^\n]*0x0*2\b", block) for block in blocks):
+        if not any(element == "permission" and internal in (android_attribute(block, "name") or "") and
+                   numeric_attribute(block, "protectionLevel") == 2 for element, block in elements):
             raise ValueError("AndroidX internal receiver permission must be signature-only")
     return permissions
 
@@ -29,8 +54,7 @@ def verify_permissions(badging, tree):
 def verify_sdk(tree):
     values = {}
     for field in ("minSdkVersion", "targetSdkVersion"):
-        match = re.search(r"android:" + field + r"(?:\([^\n)]+\))?=\(type 0x1[01]\)(0x[0-9a-fA-F]+|\d+)", tree)
-        values[field] = int(match.group(1), 0) if match else None
+        values[field] = numeric_attribute(tree, field)
     if values != {"minSdkVersion": 24, "targetSdkVersion": 36}:
         relevant = [line.strip() for line in tree.splitlines() if "SdkVersion" in line]
         raise ValueError("Unexpected compiled Android SDK configuration: " + str(values) + " " + str(relevant))
@@ -46,7 +70,7 @@ def inspect(apk, tools, commit):
     expected = "package: name='com.scholaros.app' versionCode='1' versionName='0.1.0-dev'"
     if expected not in badging or "launchable-activity: name='com.scholaros.app.MainActivity'" not in badging: raise ValueError("Unexpected package or launcher")
     tree = run("aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml")
-    permissions = verify_permissions(badging, tree)
+    permissions = verify_permissions(tree)
     verify_sdk(tree)
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
     if "CN=Android Debug" not in signature: raise ValueError("Only Debug signing expected")
