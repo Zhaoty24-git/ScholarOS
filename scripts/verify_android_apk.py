@@ -26,6 +26,17 @@ def verify_permissions(badging, tree):
     return permissions
 
 
+def verify_sdk(tree):
+    values = {}
+    for field in ("minSdkVersion", "targetSdkVersion"):
+        match = re.search(r"android:" + field + r"(?:\([^\n)]+\))?=\(type 0x1[01]\)(0x[0-9a-fA-F]+|\d+)", tree)
+        values[field] = int(match.group(1), 0) if match else None
+    if values != {"minSdkVersion": 24, "targetSdkVersion": 36}:
+        relevant = [line.strip() for line in tree.splitlines() if "SdkVersion" in line]
+        raise ValueError("Unexpected compiled Android SDK configuration: " + str(values) + " " + str(relevant))
+    return values
+
+
 def inspect(apk, tools, commit):
     if not re.fullmatch(r"[0-9a-f]{40}", commit): raise ValueError("Full build commit required")
     if not apk.is_file() or not 100_000 <= apk.stat().st_size <= 30_000_000: raise ValueError("Missing or unexpected APK size")
@@ -34,8 +45,9 @@ def inspect(apk, tools, commit):
     badging = run("aapt2", "dump", "badging")
     expected = "package: name='com.scholaros.app' versionCode='1' versionName='0.1.0-dev'"
     if expected not in badging or "launchable-activity: name='com.scholaros.app.MainActivity'" not in badging: raise ValueError("Unexpected package or launcher")
-    permissions = verify_permissions(badging, run("aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml"))
-    if "sdkVersion:'24'" not in badging or "targetSdkVersion:'36'" not in badging: raise ValueError("Unexpected Android SDK configuration")
+    tree = run("aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml")
+    permissions = verify_permissions(badging, tree)
+    verify_sdk(tree)
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
     if "CN=Android Debug" not in signature: raise ValueError("Only Debug signing expected")
     cert = re.search(r"Signer #1 certificate SHA-256 digest: (\w+)", signature)

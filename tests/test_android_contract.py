@@ -6,12 +6,23 @@ import unittest
 import xml.etree.ElementTree as ET
 from scripts.check_ci_policy import validate_android
 from scripts.check_android_test_results import check
-from scripts.verify_android_apk import verify_permissions
+from scripts.verify_android_apk import verify_permissions, verify_sdk
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class AndroidContractTests(unittest.TestCase):
+    def test_compiled_sdk_attributes_decoded(self):
+        tree = 'A: android:minSdkVersion(0x0101020c)=(type 0x10)0x18\nA: android:targetSdkVersion(0x01010270)=(type 0x10)0x24'
+        self.assertEqual(verify_sdk(tree), {"minSdkVersion": 24, "targetSdkVersion": 36})
+
+    def test_wrong_compiled_sdk_rejected(self):
+        tree = 'A: android:minSdkVersion(0x0101020c)=(type 0x10)0x18\nA: android:targetSdkVersion(0x01010270)=(type 0x10)0x23'
+        with self.assertRaises(ValueError): verify_sdk(tree)
+
+    def test_missing_sdk_metadata_is_not_success(self):
+        with self.assertRaises(ValueError): verify_sdk('E: manifest')
+
     def test_actual_system_network_permission_rejected(self):
         with self.assertRaises(ValueError): verify_permissions("uses-permission: name='android.permission.INTERNET'", "")
 

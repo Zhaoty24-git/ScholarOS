@@ -45,6 +45,8 @@ AndroidX Core 1.17.0 的官方 AAR Manifest 会合并应用自己的
 `com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` 签名级权限，用于保护旧系统的
 动态广播接收器。这不是联网/存储/账号权限；APK 检查只允许此项，且验证 protectionLevel=signature。
 第三轮 `41622881648` 已实际编译成功，原先“任何权限都拒绝”的检查在此处阻断，未上传产物。
+第四轮 `41623423493` 继续编译成功，但检查脚本的 SDK badging 文本匹配失败；随后改为
+读取 aapt2 编译 Manifest 的整数属性，并严格验证 minSdk 24 / targetSdk 36，失败会输出实际字段。
 Capacitor 在 WebView 内拦截 `https://localhost` 的打包静态资源，不启动网络服务。
 不含远程开发地址或登录框，不打包账号/Cookie/Token/LLM Key/私人课程。
 Python 不随 APK 运行；当前离线模式不需要长期服务器。
