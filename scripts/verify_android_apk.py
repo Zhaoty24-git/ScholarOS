@@ -28,7 +28,7 @@ def numeric_attribute(tree, field):
     except ValueError: return None
 
 
-def verify_permissions(tree):
+def verify_permissions(tree, network=False):
     elements = []
     for block in re.split(r"\n(?=\s*E:)", tree):
         element = re.match(r"\s*E:\s*([\w-]+)\b", block)
@@ -42,10 +42,12 @@ def verify_permissions(tree):
         permissions.append(name.group(1))
     permissions = sorted(set(permissions))
     internal = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
-    if set(permissions) - {internal}:
+    allowed = {internal, "android.permission.INTERNET"} if network else {internal}
+    if set(permissions) - allowed:
         raise ValueError("Unexpected offline APK permissions: " + ", ".join(permissions))
+    if network and "android.permission.INTERNET" not in permissions: raise ValueError("AI APK needs explicit INTERNET permission")
     if internal in permissions:
-        if not any(element == "permission" and internal in (android_attribute(block, "name") or "") and
+        if not any(element == "permission" and re.match(r'^"' + re.escape(internal) + r'"(?:\s|$)', android_attribute(block, "name") or "") and
                    numeric_attribute(block, "protectionLevel") == 2 for element, block in elements):
             raise ValueError("AndroidX internal receiver permission must be signature-only")
     return permissions
@@ -67,10 +69,10 @@ def inspect(apk, tools, commit):
     def run(tool, *args):
         return subprocess.check_output([str(tools / tool), *args, str(apk)], text=True, stderr=subprocess.STDOUT)
     badging = run("aapt2", "dump", "badging")
-    expected = "package: name='com.scholaros.app' versionCode='1' versionName='0.1.0-dev'"
+    expected = "package: name='com.scholaros.app' versionCode='2' versionName='0.2.0-dev'"
     if expected not in badging or "launchable-activity: name='com.scholaros.app.MainActivity'" not in badging: raise ValueError("Unexpected package or launcher")
     tree = run("aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml")
-    permissions = verify_permissions(tree)
+    permissions = verify_permissions(tree, network=True)
     verify_sdk(tree)
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
     if "CN=Android Debug" not in signature: raise ValueError("Only Debug signing expected")
@@ -88,6 +90,7 @@ def inspect(apk, tools, commit):
             raise ValueError("Missing upstream/runtime license notices")
         config = json.loads(archive.read("assets/capacitor.config.json"))
         if config.get("appId") != "com.scholaros.app" or config.get("server", {}).get("url") or config.get("server", {}).get("cleartext") is not False: raise ValueError("Unsafe Capacitor server configuration")
+        if config.get("loggingBehavior") != "none" or config.get("plugins", {}).get("CapacitorHttp", {}).get("enabled") is not False: raise ValueError("Credential bridge logging or generic HTTP enabled")
         html = archive.read("assets/public/index.html").decode()
         if "connect-src 'none'" not in html: raise ValueError("Missing offline CSP")
         scripts = [n for n in assets if n.startswith("assets/public/assets/") and n.endswith(".js")]
@@ -97,10 +100,17 @@ def inspect(apk, tools, commit):
             if text not in js: raise ValueError("Offline data or entry absent")
         for text in ["/api/settings/status", "VITE_API_BASE_URL", "synthetic-build-canary-", "BEGIN PRIVATE KEY", "LEARN_PASSWORD="]:
             if text in js: raise ValueError("Online entry or sensitive configuration in offline bundle")
+        for text in ["agnes-3.0-flash", "https://api.agnes-ai.cn/v1"]:
+            if text not in js: raise ValueError("Domestic Agnes configuration missing")
+        for name in names:
+            if name.endswith((".dex", ".js", ".json", ".html", ".xml")):
+                data = archive.read(name)
+                if b"synthetic-agnes-" in data or re.search(rb"sk-[A-Za-z0-9_-]{20,}", data):
+                    raise ValueError("Credential-like value or test key entered production APK")
     with apk.open("rb") as stream: checksum = hashlib.file_digest(stream, "sha256").hexdigest()
-    return {"commit": commit, "file": "ScholarOS-0.1.0-dev-debug.apk", "bytes": apk.stat().st_size,
+    return {"commit": commit, "file": "ScholarOS-0.2.0-dev-debug.apk", "bytes": apk.stat().st_size,
             "sha256": checksum, "applicationId": "com.scholaros.app",
-            "versionCode": 1, "versionName": "0.1.0-dev", "minSdk": 24, "targetSdk": 36,
+            "versionCode": 2, "versionName": "0.2.0-dev", "minSdk": 24, "targetSdk": 36,
             "signing": "Android Debug", "certificate_sha256": cert.group(1), "permissions": permissions, "zip_integrity": "passed"}
 
 

@@ -1,4 +1,7 @@
 import React, { useEffect, useState } from "react";
+import { ChatController, type ContextAttachment } from "../ai/model";
+import { nativeTransport } from "../ai/native";
+import { ChatPage } from "../ai/ChatPage";
 import { createRoot } from "react-dom/client";
 import { App as NativeApp } from "@capacitor/app";
 import { Capacitor } from "@capacitor/core";
@@ -15,6 +18,10 @@ import {
 import "./styles.css";
 
 const demo = makeDemo();
+const aiContexts: ContextAttachment[] = [
+  ...courses.map(c => ({ provenance: "synthetic_demo" as const, label: c.name, text: `${c.name}\n${c.description}` })),
+  ...demo.assignments.slice(0, 6).map(t => ({ provenance: "synthetic_demo" as const, label: t.title, text: `课程：${t.courseId}\n作业：${t.title}\n${t.body}\n截止：${t.deadline || "待定"}` })),
+];
 const course = (id: string) => courses.find((c) => c.id === id)!;
 const icons = [
   "M3 10 12 3l9 7v10H6V10",
@@ -22,6 +29,7 @@ const icons = [
   "m5 7 2 2 4-4M13 7h7M5 15l2 2 4-4M13 15h7",
   "M5 17h14l-2-3V9a5 5 0 0 0-10 0v5ZM10 21h4",
   "M3 6h7l2 3h9v11H3Z",
+  "M4 4h16v13H9l-5 4ZM8 8h8M8 12h5",
   "M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8ZM12 2v3M12 19v3M2 12h3M19 12h3M5 5l2 2M17 17l2 2M5 19l2-2M17 7l2-2",
 ];
 function Icon({ index }: { index: number }) {
@@ -79,6 +87,8 @@ function Task({ task }: { task: Assignment }) {
   );
 }
 export function OfflineApp() {
+  const [aiTransport] = useState(nativeTransport);
+  const [chatController] = useState(() => new ChatController(aiTransport));
   const [route, setRoute] = useState(() => safeRoute(window.location.hash));
   const [limit, setLimit] = useState(8);
   const [theme, setTheme] = useState("system");
@@ -130,7 +140,7 @@ export function OfflineApp() {
         </div>
         <span className="mode">
           <i />
-          离线演示模式
+          {page === "ai" ? "AI 助手 · 联网需确认" : "离线演示模式"}
         </span>
       </header>
       <main id="content" key={route}>
@@ -165,7 +175,7 @@ export function OfflineApp() {
             </section>
             <div className="demo-note">
               <span aria-hidden="true">◇</span>{" "}
-              所有内容均为合成演示数据。无需登录，不会同步或上传。
+              学习工作台使用合成演示数据，保持离线。仅在 AI 页确认发送时联网。
             </div>
             {section("最近作业", "assignments")}
             <section className="panel">
@@ -219,7 +229,7 @@ export function OfflineApp() {
           <div className="page-heading">
             <span className="eyebrow">SCHOLAROS / OFFLINE</span>
             <h1>{title}</h1>
-            <p className="subtitle">合成数据 · 仅供离线体验</p>
+            <p className="subtitle">{page === "ai" ? "主动提问 · 设备端直连 Agnes · 请核对 AI 回答" : "合成数据 · 仅供离线体验"}</p>
           </div>
         )}
         {page === "courses" &&
@@ -358,6 +368,7 @@ export function OfflineApp() {
             </section>
           </>
         )}
+        {page === "ai" && <ChatPage controller={chatController} transport={aiTransport} contexts={aiContexts} />}
         {page === "settings" && (
           <>
             <section className="panel settings">
@@ -385,12 +396,15 @@ export function OfflineApp() {
                 <option value="light">浅色</option>
                 <option value="dark">深色</option>
               </select>
+              <button className="secondary" onClick={() => navigate("ai")}>AI 助手与 Agnes API 配置</button>
             </section>
             <section className="panel limitations">
               <h2>当前未支持</h2>
               <p>
-                校园登录、真实同步、连接服务、作业提交、文件导入与阅读、AI
-                问答及消息推送。
+                校园登录、真实同步、连接服务、作业提交、文件导入与阅读及消息推送。
+              </p>
+              <p>
+                AI 助手需你在手机配置对应区域的新 Agnes API Key 并主动同意发送。密钥不写入 APK 或 CI。
               </p>
               <p>
                 此 APK 不运行 Python 后端。手机的 localhost

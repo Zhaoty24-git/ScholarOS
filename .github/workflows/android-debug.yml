@@ -2,7 +2,7 @@ name: ScholarOS Android Debug
 
 on:
   push:
-    branches: [codex/android-offline-apk-pr3]
+    branches: [codex/android-offline-apk-pr3, codex/agnes-ai-pr4]
   pull_request:
   workflow_dispatch:
 
@@ -76,7 +76,10 @@ jobs:
             adb shell settings put global airplane_mode_on 1
             adb shell svc wifi disable
             adb shell svc data disable
+            adb logcat -c
             python3 scripts/run_android_gradle.py device
+            adb logcat -d > "$RUNNER_TEMP/scholaros-device.log"
+            python3 scripts/check_android_logs.py "$RUNNER_TEMP/scholaros-device.log"
       - name: Check all emulator tests passed without skips
         run: python3 scripts/check_android_test_results.py frontend/android/app/build/outputs/androidTest-results/connected
       - name: Upload verified test APK and manifest

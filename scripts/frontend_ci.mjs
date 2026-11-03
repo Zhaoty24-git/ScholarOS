@@ -40,6 +40,7 @@ try {
   run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
   run("npm", ["run", "test:security"]);
   run("npm", ["run", "test:offline"]);
+  run("npm", ["run", "test:ai"]);
   run("node", ["node_modules/typescript/bin/tsc", "--noEmit"]);
   run("npm", ["run", android ? "build:android" : "build"]);
   const dist = resolve(stage, android ? "dist-android" : "dist");

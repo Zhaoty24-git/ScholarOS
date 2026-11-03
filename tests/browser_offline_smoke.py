@@ -51,7 +51,7 @@ async def exercise(ws_url, origin):
         print("PASS notice list and detail")
         await page("资料"); assert await js("document.querySelector('main').textContent.includes('未实现阅读') && !document.querySelector('main button')")
         print("PASS honest unsupported material operations")
-        await page("设置"); assert await js("document.querySelector('main').textContent.includes('未连接') && document.querySelector('main').textContent.includes('0.1.0-dev')")
+        await page("设置"); assert await js("document.querySelector('main').textContent.includes('未连接') && document.querySelector('main').textContent.includes('0.2.0-dev')")
         await js("(()=>{const s=document.querySelector('select');s.value='dark';s.dispatchEvent(new Event('change',{bubbles:true}));})()")
         await wait("!!document.querySelector('.theme-dark')")
         assert await js("document.documentElement.scrollWidth<=innerWidth")

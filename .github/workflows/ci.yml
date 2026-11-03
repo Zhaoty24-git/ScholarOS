@@ -2,7 +2,7 @@ name: ScholarOS Offline CI
 
 on:
   push:
-    branches: [main, codex/ci-offline-tests-pr2, codex/android-offline-apk-pr3]
+    branches: [main, codex/ci-offline-tests-pr2, codex/android-offline-apk-pr3, codex/agnes-ai-pr4]
   pull_request:
   workflow_dispatch:
 
