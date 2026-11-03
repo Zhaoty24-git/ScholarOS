@@ -3,11 +3,27 @@
 from __future__ import annotations
 
 import os
+import threading
+from functools import wraps
 import re
 from pathlib import Path
 from typing import Any
 
 from backend.app.settings import settings
+from src.security import private_write
+from dotenv import dotenv_values
+import io
+
+_ENV_LOCK = threading.RLock()
+
+
+def _serialized(fn):
+    @wraps(fn)
+    def wrapped(*args, **kwargs):
+        with _ENV_LOCK:
+            return fn(*args, **kwargs)
+    return wrapped
+
 
 # Known keys the settings API may read or incrementally update.
 KNOWN_ENV_KEYS = [
@@ -33,13 +49,6 @@ KNOWN_ENV_KEYS = [
     "LEARNING_ASSISTANT_ROOT",
 ]
 
-SECRET_KEYS = {
-    "LEARN_PASSWORD",
-    "MAIL_PASSWORD",
-    "JWCH_PASSWORD",
-    "LLM_D_API_KEY",
-}
-
 # Fill missing adapter endpoints from the project template.
 DEFAULT_ENV_VALUES = {
     "LEARN_BASE_URL": "https://learn.tsinghua.edu.cn",
@@ -60,34 +69,15 @@ def env_file_path() -> Path:
     return settings.project_root / ".env"
 
 
-def mask_secret(value: str) -> str:
-    value = value.strip()
-    if not value:
-        return ""
-    if len(value) <= 4:
-        return "****"
-    return f"{value[:2]}****{value[-4:]}"
-
-
 def parse_env_file(path: Path) -> dict[str, str]:
     if not path.exists():
         return {}
-    values: dict[str, str] = {}
-    for raw_line in path.read_text(encoding="utf-8").splitlines():
-        line = raw_line.strip()
-        if not line or line.startswith("#"):
-            continue
-        if "=" not in line:
-            continue
-        key, _, rest = line.partition("=")
-        key = key.strip()
-        value = rest.strip()
-        if (value.startswith('"') and value.endswith('"')) or (value.startswith("'") and value.endswith("'")):
-            value = value[1:-1]
-        values[key] = value
-    return values
+    if path.is_symlink():
+        raise ValueError("Refusing symlink configuration")
+    return {k: v or "" for k, v in dotenv_values(stream=io.StringIO(path.read_text(encoding="utf-8")), interpolate=False).items()}
 
 
+@_serialized
 def ensure_env_defaults(path: Path | None = None) -> list[str]:
     """Backfill known default env values without overwriting user settings."""
     target = path or env_file_path()
@@ -102,10 +92,19 @@ def ensure_env_defaults(path: Path | None = None) -> list[str]:
     return list(updates.keys())
 
 
+@_serialized
 def write_env_incremental(updates: dict[str, str | None], path: Path | None = None) -> dict[str, Any]:
     """Merge known keys into .env without overwriting unspecified fields."""
     target = path or env_file_path()
+    # Validate the complete update before reading or mutating local state.
+    for key, value in updates.items():
+        if key in KNOWN_ENV_KEYS and value is not None and any(c in str(value) for c in "\r\n\x00"):
+            raise ValueError("Configuration values must be single-line")
     existing = parse_env_file(target)
+    if any(any(c in value for c in "\r\n\x00") for value in existing.values()):
+        # The line-preserving editor must not leave continuation lines behind
+        # when replacing a pre-existing multiline dotenv assignment.
+        raise ValueError("Multiline configuration requires manual review")
     changed: list[str] = []
 
     for key, value in updates.items():
@@ -116,33 +115,26 @@ def write_env_incremental(updates: dict[str, str | None], path: Path | None = No
         existing[key] = str(value).strip()
         changed.append(key)
 
-    lines: list[str] = []
+    # Remove all old definitions of updated keys, including duplicates.
+    changed_keys = set(changed)
+    lines = []
     if target.exists():
         for raw_line in target.read_text(encoding="utf-8").splitlines():
-            stripped = raw_line.strip()
-            if stripped and not stripped.startswith("#") and "=" in stripped:
-                key = stripped.split("=", 1)[0].strip()
-                if key in existing and key in changed:
-                    lines.append(f"{key}={existing[key]}")
-                    changed.remove(key)
-                    continue
-            lines.append(raw_line)
-    else:
-        lines.append("# Learning Assistant local configuration")
-        lines.append("# Auto-managed by E module settings API — do not commit")
-
+            key = raw_line.strip().split("=", 1)[0].strip()
+            if key.removeprefix("export ").strip() not in changed_keys:
+                lines.append(raw_line)
     for key in changed:
-        lines.append(f"{key}={existing[key]}")
+        lines.append(f"{key}={_quote_env(existing[key])}")
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    target.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    private_write(target, "\n".join(lines) + "\n")
 
     # Refresh process env for keys we just wrote
     for key in updates:
         if key in existing:
             os.environ[key] = existing[key]
 
-    return {"written": list(updates.keys()), "path": str(target)}
+    return {"written": list(updates.keys())}
 
 
 def settings_status() -> dict[str, Any]:
@@ -155,10 +147,7 @@ def settings_status() -> dict[str, Any]:
         env_value = os.getenv(key, file_values.get(key, ""))
         configured = bool(str(env_value or "").strip())
         entry: dict[str, Any] = {"configured": configured}
-        if key in SECRET_KEYS:
-            entry["masked"] = mask_secret(str(env_value)) if configured else ""
-        elif configured:
-            entry["value"] = str(env_value)
+        # Report presence only; usernames, endpoints and EXTRA_JSON may also be private.
         fields[key] = entry
 
     data_paths = {
@@ -171,7 +160,6 @@ def settings_status() -> dict[str, Any]:
 
     return {
         "env_file_exists": path.exists(),
-        "env_file_path": str(path),
         "fields": fields,
         "data_paths": data_paths,
         "semester_start": settings.semester_start,
@@ -182,6 +170,8 @@ def settings_status() -> dict[str, Any]:
 
 def bootstrap_from_txt_files() -> dict[str, Any]:
     """Best-effort bootstrap from local credential txt files (never committed)."""
+    if os.getenv("SCHOLAROS_ALLOW_CREDENTIAL_IMPORT") != "1":
+        return {"status": "blocked", "message": "Credential file import is disabled"}
     root = settings.project_root
     updates: dict[str, str | None] = {}
     imported: list[str] = []
@@ -227,3 +217,7 @@ def bootstrap_from_txt_files() -> dict[str, Any]:
         "status": "ready",
         "source_module": "E",
     }
+
+
+def _quote_env(value: str) -> str:
+    return "'" + value.replace("\\", "\\\\").replace("'", "\\'") + "'"

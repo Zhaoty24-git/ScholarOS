@@ -633,7 +633,8 @@ def build_parse_report(
 def write_parse_report(report: MaterialParseReport, output_path: str | Path) -> None:
     path = Path(output_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(report.to_dict(), ensure_ascii=False, indent=2), encoding="utf-8")
+    from src.security import private_write
+    private_write(path, json.dumps(report.to_dict(), ensure_ascii=False, indent=2))
 
 
 def load_attachment_manifest(path: str | Path) -> dict[str, dict[str, Any]]:

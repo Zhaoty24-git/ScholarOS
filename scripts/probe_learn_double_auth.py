@@ -18,6 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.adapters.learn_adapter import LearnAdapter, discover_auth_form_url, select_login_form
+from src.security import private_write
 from src.env_loader import load_project_env
 
 
@@ -46,10 +47,15 @@ def save_session(session, *, auth_url: str, auth_html: str) -> None:
     data = {
         "created_at": datetime.now().isoformat(),
         "auth_url": auth_url,
-        "cookies": session.cookies.get_dict(),
+        "cookies": [
+            {"name": cookie.name, "value": cookie.value, "domain": cookie.domain,
+             "path": cookie.path, "secure": True}
+            for cookie in session.cookies
+            if cookie.domain.lstrip(".") in {"learn.tsinghua.edu.cn", "id.tsinghua.edu.cn"}
+        ],
         "auth_html": auth_html,
     }
-    SESSION_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    private_write(SESSION_PATH, json.dumps(data, ensure_ascii=False))
 
 
 def load_session(adapter: LearnAdapter):
@@ -57,7 +63,13 @@ def load_session(adapter: LearnAdapter):
         raise SystemExit("No saved double-auth session. Run start first.")
     data = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
     session = adapter._build_session()
-    session.cookies.update(data["cookies"])
+    cookies = data.get("cookies")
+    if not isinstance(cookies, list):
+        raise SystemExit("Legacy unscoped session refused; restart authentication.")
+    for cookie in cookies:
+        if cookie.get("domain", "").lstrip(".") not in {"learn.tsinghua.edu.cn", "id.tsinghua.edu.cn"}:
+            raise SystemExit("Untrusted session cookie domain")
+        session.cookies.set(cookie["name"], cookie["value"], domain=cookie["domain"], path=cookie.get("path", "/"), secure=True)
     adapter._session = session
     return session, data
 
@@ -125,12 +137,12 @@ def verify_double_auth(code: str, *, trust_device: bool, device_name: str) -> in
         trust.raise_for_status()
         trust_data = trust.json()
         TRUST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TRUST_PATH.write_text(json.dumps(trust_data, ensure_ascii=False), encoding="utf-8")
+        private_write(TRUST_PATH, json.dumps(trust_data, ensure_ascii=False))
         print(f"trust_device result={trust_data.get('result')} msg_present={bool(trust_data.get('msg'))}")
 
     final = session.get(adapter.require("base_url"), timeout=20)
     final.raise_for_status()
-    print(f"learn_final_url={final.url}")
+    print(f"learn_final_status={final.status_code}")
     print(f"learn_final_bytes={len(final.text.encode('utf-8'))}")
     return 0
 

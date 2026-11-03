@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiPost, apiUrl } from "./api";
+import { apiGet, apiPost, apiUrl, apiFetch, setAccessToken } from "./api";
 
 type AnyRecord = Record<string, any>;
 type TaskView = "pending" | "homework" | "all";
@@ -64,6 +64,29 @@ const defaultLocalSettingsForm: LocalSettingsForm = {
 };
 
 export function App() {
+  const [authorized, setAuthorized] = useState(false);
+  const [token, setToken] = useState("");
+  const [loginError, setLoginError] = useState("");
+  if (authorized) return <><button onClick={() => { setAccessToken(""); setAuthorized(false); }}>锁定会话</button><AuthenticatedApp /></>;
+  return <main className="app"><form onSubmit={async (event) => {
+    event.preventDefault();
+    setAccessToken(token);
+    try {
+      await apiGet("/api/settings/status");
+      setToken(""); setAuthorized(true); setLoginError("");
+    } catch {
+      setAccessToken(""); setLoginError("连接失败：请检查后端与访问令牌。");
+    }
+  }}>
+    <h1>ScholarOS</h1>
+    <label>访问令牌 <input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required /></label>
+    <button type="submit">连接</button>
+    <p>令牌仅保留在当前页面内存中，刷新后需要重新输入。</p>
+    {loginError && <p role="alert">{loginError}</p>}
+  </form></main>;
+}
+
+function AuthenticatedApp() {
   const [active, setActive] = useState<(typeof pages)[number]["id"]>("home");
   const [dashboard, setDashboard] = useState<AnyRecord | null>(null);
   const [tasks, setTasks] = useState<AnyRecord[]>([]);
@@ -101,6 +124,7 @@ export function App() {
 
   const [settingsStatus, setSettingsStatus] = useState<AnyRecord | null>(null);
   const [localSettings, setLocalSettings] = useState<LocalSettingsForm>(defaultLocalSettingsForm);
+  const initialSettings = useRef<LocalSettingsForm>(defaultLocalSettingsForm);
   const [settingsLoading, setSettingsLoading] = useState(false);
   const [settingsSaving, setSettingsSaving] = useState(false);
   const [settingsSaved, setSettingsSaved] = useState(false);
@@ -310,7 +334,7 @@ export function App() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await fetch(apiUrl("/api/upload"), { method: "POST", body: formData });
+      const response = await apiFetch("/api/upload", { method: "POST", body: formData });
       const data = await response.json() as AnyRecord;
       if (!response.ok) {
         throw new Error(data.detail ?? data.message ?? `上传失败: ${response.status}`);
@@ -394,17 +418,21 @@ export function App() {
       const data = await apiGet<AnyRecord>("/api/settings/status");
       setSettingsStatus(data);
       const fields = data.fields ?? {};
-      setLocalSettings((current) => ({
-        ...current,
-        learn_username: settingsFieldValue(fields, "LEARN_USERNAME", ""),
-        learn_password: "",
-        mail_username: settingsFieldValue(fields, "MAIL_USERNAME", ""),
-        mail_password: "",
-        llm_base_url: settingsFieldValue(fields, "LLM_D_BASE_URL", "https://api.deepseek.com"),
-        llm_api_key: "",
-        llm_model: settingsFieldValue(fields, "LLM_D_MODEL", "deepseek-v4-pro"),
-        llm_timeout: Number(settingsFieldValue(fields, "LLM_D_TIMEOUT", "60")) || 60,
-      }));
+      setLocalSettings((current) => {
+        const next = {
+          ...current,
+          learn_username: settingsFieldValue(fields, "LEARN_USERNAME", ""),
+          learn_password: "",
+          mail_username: settingsFieldValue(fields, "MAIL_USERNAME", ""),
+          mail_password: "",
+          llm_base_url: settingsFieldValue(fields, "LLM_D_BASE_URL", "https://api.deepseek.com"),
+          llm_api_key: "",
+          llm_model: settingsFieldValue(fields, "LLM_D_MODEL", "deepseek-v4-pro"),
+          llm_timeout: Number(settingsFieldValue(fields, "LLM_D_TIMEOUT", "60")) || 60,
+        };
+        initialSettings.current = next;
+        return next;
+      });
     } catch {
       // ignore
     } finally {
@@ -417,16 +445,11 @@ export function App() {
     setSettingsSaving(true);
     setError(null);
     try {
-      const data = await apiPost<AnyRecord>("/api/settings/local", {
-        learn_username: localSettings.learn_username,
-        learn_password: localSettings.learn_password,
-        mail_username: localSettings.mail_username,
-        mail_password: localSettings.mail_password,
-        llm_base_url: localSettings.llm_base_url,
-        llm_api_key: localSettings.llm_api_key,
-        llm_model: localSettings.llm_model,
-        llm_timeout: localSettings.llm_timeout,
-      });
+      const updates = Object.fromEntries(Object.entries(localSettings).filter(
+        ([key, value]) => value !== "" && value !== initialSettings.current[key as keyof LocalSettingsForm],
+      ));
+      const data = await apiPost<AnyRecord>("/api/settings/local", updates);
+      initialSettings.current = { ...localSettings, learn_password: "", mail_password: "", llm_api_key: "" };
       setSettingsStatus((current) => ({ ...(current ?? {}), fields: data.fields ?? current?.fields }));
       setLocalSettings((current) => ({
         ...current,

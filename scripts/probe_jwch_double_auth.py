@@ -14,6 +14,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.adapters.base_adapter import AdapterConfig
+from src.security import private_write
 from src.adapters.jwch_adapter import JwchAdapter
 from src.adapters.learn_adapter import select_login_form
 from src.env_loader import load_project_env
@@ -68,7 +69,7 @@ def save_session(session) -> None:
         "created_at": datetime.now().isoformat(),
         "cookies": session.cookies.get_dict(domain="auth.cic.tsinghua.edu.cn"),
     }
-    SESSION_PATH.write_text(json.dumps(data, ensure_ascii=False), encoding="utf-8")
+    private_write(SESSION_PATH, json.dumps(data, ensure_ascii=False))
 
 
 def load_session(adapter: JwchAdapter):
@@ -77,7 +78,7 @@ def load_session(adapter: JwchAdapter):
     data = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
     session = adapter._build_session()
     for name, value in data.get("cookies", {}).items():
-        session.cookies.set(name, value, domain="auth.cic.tsinghua.edu.cn", path="/")
+        session.cookies.set(name, value, domain="auth.cic.tsinghua.edu.cn", path="/", secure=True)
     adapter._session = session
     return session
 
@@ -137,7 +138,7 @@ def verify_double_auth(code: str, *, trust_device: bool, device_name: str) -> in
         trust.raise_for_status()
         trust_data = trust.json()
         TRUST_PATH.parent.mkdir(parents=True, exist_ok=True)
-        TRUST_PATH.write_text(json.dumps(trust_data, ensure_ascii=False), encoding="utf-8")
+        private_write(TRUST_PATH, json.dumps(trust_data, ensure_ascii=False))
         print(f"jwch_trust_device result={trust_data.get('result')} msg_present={bool(trust_data.get('msg'))}")
     return 0
 

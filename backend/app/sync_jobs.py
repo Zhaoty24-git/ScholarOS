@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 import subprocess
 import sys
@@ -163,7 +164,7 @@ def _run_job(job_id: str, command: list[str], output_path: Path) -> None:
             cwd=settings.project_root,
             stdout=log_file,
             stderr=subprocess.STDOUT,
-            env=None,
+            env={k: v for k, v in os.environ.items() if k != "SCHOLAROS_API_TOKEN"},
         )
     _finalize_job(job_id, exit_code=proc.returncode, log_path=log_path, output_path=output_path)
 

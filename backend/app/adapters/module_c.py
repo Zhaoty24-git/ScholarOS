@@ -57,14 +57,14 @@ class ModuleCAdapter:
                 "indexed_chunks": 0,
                 "index_types": ["keyword", "vector", "hybrid"],
                 "filters": ["course_name", "material_type"],
-                "message": f"知识库状态读取失败：{exc}",
+                "message": f"知识库状态读取失败：{type(exc).__name__}",
                 "source_module": "C",
                 "warnings": [],
                 "errors": [
                     {
                         "error_code": "knowledge_status_failed",
                         "user_message": "知识库暂时不可用，不影响任务和资料页。",
-                        "detail": str(exc),
+                        "detail": type(exc).__name__,
                         "retryable": True,
                     }
                 ],
@@ -126,26 +126,26 @@ class ModuleCAdapter:
                     "status": "ready",
                     "message": "重建失败，已保留上一版可用索引。",
                     "source_module": "C",
-                    "warnings": [str(exc)],
+                    "warnings": [type(exc).__name__],
                     "errors": [
                         {
                             "error_code": "rebuild_failed",
                             "user_message": "索引重建失败，仍可使用旧索引。",
-                            "detail": str(exc),
+                            "detail": type(exc).__name__,
                             "retryable": True,
                         }
                     ],
                 }
             return {
                 "status": "blocked",
-                "message": f"知识库重建失败：{exc}",
+                "message": f"知识库重建失败：{type(exc).__name__}",
                 "source_module": "C",
                 "warnings": [],
                 "errors": [
                     {
                         "error_code": "rebuild_failed",
                         "user_message": "知识库不可用，请先确保资料已解析。",
-                        "detail": str(exc),
+                        "detail": type(exc).__name__,
                         "retryable": True,
                     }
                 ],
@@ -199,7 +199,7 @@ class ModuleCAdapter:
                             {
                                 "error_code": "search_failed",
                                 "user_message": "检索失败，请稍后重试或重建知识库。",
-                                "detail": str(exc),
+                                "detail": type(exc).__name__,
                                 "retryable": True,
                             }
                         ],

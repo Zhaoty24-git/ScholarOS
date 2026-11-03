@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Any
 from urllib.parse import urlencode, urljoin, urlparse
 
+from src.security import validate_auth_url
 from .base_adapter import AdapterConfig, AdapterError, BaseAdapter, RawPayload
 from .learn_adapter import (
     discover_auth_form_url,
@@ -201,11 +202,17 @@ class JwchAdapter(BaseAdapter):
             value = item.get("value")
             if not isinstance(name, str) or not isinstance(value, str):
                 continue
+            domain = str(item.get("domain") or "info.tsinghua.edu.cn")
+            if domain.lstrip(".") != "info.tsinghua.edu.cn":
+                raise AdapterError("Info cookie domain is not trusted")
+            if any(ord(c) < 32 or ord(c) == 127 for c in name + value):
+                raise AdapterError("Invalid Info cookie")
             self._session.cookies.set(
                 name,
                 value,
-                domain=str(item.get("domain") or "info.tsinghua.edu.cn"),
+                domain=domain,
                 path=str(item.get("path") or "/"),
+                secure=True,
             )
 
     def _has_info_session_cookie(self) -> bool:
@@ -280,10 +287,12 @@ class JwchAdapter(BaseAdapter):
         payload[password_field] = self._prepare_password(form_page_url, form_page_html)
         payload.update(load_trusted_device_fields(self.config.extra.get("trust_path")))
 
-        submit_url = urljoin(form_page_url, str(form.get("action") or ""))
+        submit_url = validate_auth_url(urljoin(form_page_url, str(form.get("action") or "")))
         try:
-            result = self._session.post(submit_url, data=payload, timeout=timeout)
+            result = self._session.post(submit_url, data=payload, timeout=timeout, allow_redirects=False)
             result.raise_for_status()
+            if 300 <= result.status_code < 400:
+                raise AdapterError("Authentication redirect requires review")
         except Exception as exc:
             raise AdapterError("jwch_adapter login submit failed") from exc
 
@@ -433,14 +442,16 @@ class JwchAdapter(BaseAdapter):
         raise AdapterError("jwch_adapter portal redirect requires XSRF-TOKEN from Info login")
 
     def _prepare_password(self, form_page_url: str, form_page_html: str) -> str:
+        validate_auth_url(form_page_url)
         public_key = extract_sm2_public_key(form_page_html)
         if not public_key:
-            return self._credential("password")
+            raise AdapterError("Unencrypted credential submission refused")
 
         sm2_url = discover_sm2_script_url(form_page_url, form_page_html)
         if not sm2_url:
             raise AdapterError("jwch_adapter login failed: SM2 script URL missing")
 
+        validate_auth_url(sm2_url)
         timeout = float(self.config.extra.get("timeout_seconds", 20))
         try:
             sm2_response = self._session.get(sm2_url, timeout=timeout)

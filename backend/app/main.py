@@ -14,9 +14,13 @@ from typing import Any
 from dotenv import load_dotenv
 
 # Load .env before any adapter imports so env vars are available at module level
-load_dotenv(Path(__file__).resolve().parents[2] / ".env")
+load_dotenv(Path(__file__).resolve().parents[2] / ".env", interpolate=False)
 
-from fastapi import FastAPI, File, HTTPException, Query, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile, Request
+from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
+from starlette.middleware.trustedhost import TrustedHostMiddleware
+from backend.app.security import SecurityBoundary, allowed_origins, RedactedRoute
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 
@@ -46,14 +50,35 @@ from src.materials.extractors import MaterialParseError, extractor_for_path
 
 
 app = FastAPI(title="Learning Assistant E Module API", version="0.2.0")
+app.router.route_class = RedactedRoute
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=allowed_origins(),
     allow_credentials=False,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST"],
+    allow_headers=["Authorization", "Content-Type"],
 )
-static_dir = settings.project_root / "frontend_static"
+app.add_middleware(SecurityBoundary)
+app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
+
+
+@app.exception_handler(RequestValidationError)
+async def invalid_request(request: Request, exc: RequestValidationError):
+    # Validation errors may contain submitted credentials: never echo input.
+    return JSONResponse({"detail": "Invalid request"}, status_code=422)
+
+
+@app.exception_handler(ValueError)
+async def invalid_value(request: Request, exc: ValueError):
+    return JSONResponse({"detail": "Invalid configuration value"}, status_code=400)
+
+
+@app.exception_handler(Exception)
+async def internal_error(request: Request, exc: Exception):
+    return JSONResponse({"detail": "Operation failed"}, status_code=500)
+
+
+static_dir = settings.project_root / "frontend" / "dist"
 if static_dir.exists():
     app.mount("/app", StaticFiles(directory=static_dir, html=True), name="app")
 
@@ -64,7 +89,8 @@ module_d = ModuleDAdapter()
 
 
 def _run_background(command: list[str], cwd: Path | None = None) -> dict[str, Any]:
-    subprocess.Popen(command, cwd=cwd or settings.project_root)
+    subprocess.Popen(command, cwd=cwd or settings.project_root,
+                     env={k: v for k, v in os.environ.items() if k != "SCHOLAROS_API_TOKEN"})
     return {"status": "queued", "command": " ".join(command)}
 
 
@@ -72,7 +98,7 @@ def _run_checked(command: list[str], *, env: dict[str, str] | None = None) -> di
     completed = subprocess.run(
         command,
         cwd=settings.project_root,
-        env={**os.environ, **(env or {})},
+        env={k: v for k, v in {**os.environ, **(env or {})}.items() if k != "SCHOLAROS_API_TOKEN"},
         text=True,
         capture_output=True,
         check=False,
@@ -87,21 +113,7 @@ def _run_checked(command: list[str], *, env: dict[str, str] | None = None) -> di
 
 @app.get("/api/health")
 def health() -> dict[str, Any]:
-    d_status = module_d.status()
-    return {
-        "status": "ok",
-        "modules": {
-            "A": module_a.sync_status()["status"],
-            "B": module_b.parse_status()["status"],
-            "C": module_c.status()["status"],
-            "D": d_status.get("status", "missing"),
-            "E": "ready",
-        },
-        "module_details": {
-            "D": d_status,
-        },
-        "source_module": "E",
-    }
+    return {"status": "ok"}
 
 
 @app.get("/api/settings/status")
@@ -566,9 +578,11 @@ async def _extract_uploaded_file(file: UploadFile) -> dict[str, Any]:
     suffix = Path(file.filename or "upload").suffix.lower()
     if not suffix:
         raise HTTPException(status_code=400, detail="上传文件缺少扩展名，无法判断格式。")
-    payload = await file.read()
-    if len(payload) > 20 * 1024 * 1024:
-        raise HTTPException(status_code=413, detail="上传文件超过 20MB，请压缩后再试。")
+    payload = bytearray()
+    while chunk := await file.read(64 * 1024):
+        if len(payload) + len(chunk) > 20 * 1024 * 1024:
+            raise HTTPException(status_code=413, detail="上传文件超过 20MB，请压缩后再试。")
+        payload.extend(chunk)
 
     with tempfile.TemporaryDirectory(prefix="learning-assistant-upload-") as temp_dir:
         path = Path(temp_dir) / f"upload{suffix}"
@@ -589,7 +603,7 @@ async def _extract_uploaded_file(file: UploadFile) -> dict[str, Any]:
                     }
                 )
         except MaterialParseError as exc:
-            raise HTTPException(status_code=400, detail=str(exc)) from exc
+            raise HTTPException(status_code=400, detail="文件解析失败") from exc
         except Exception as exc:
             raise HTTPException(status_code=400, detail=f"文件解析失败：{type(exc).__name__}") from exc
 
