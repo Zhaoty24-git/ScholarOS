@@ -75,4 +75,4 @@ jobs:
       - name: Clean npm ci, request tests, TypeScript and Vite
         run: node scripts/frontend_ci.mjs --output "$RUNNER_TEMP/scholaros-frontend-dist"
       - name: Local synthetic browser scenarios
-        run: python tests/browser_security_smoke.py --dist "$RUNNER_TEMP/scholaros-frontend-dist"
+        run: python tests/browser_security_smoke.py --browser google-chrome --dist "$RUNNER_TEMP/scholaros-frontend-dist"

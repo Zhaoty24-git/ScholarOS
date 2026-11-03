@@ -136,6 +136,13 @@ Linux 构建无需执行。干净构建已验证禁用脚本仍可工作。
 另有不安全工作流/秘密产物/缺失资源的负向断言。
 
 GitHub Actions 的运行 ID、对应 SHA、job 状态必须在推送后通过真实页面核实，见本次交付报告。
+首次真实运行为 [41604925965](https://github.com/Zhaoty24-git/ScholarOS/actions/runs/41604925965)，
+对应 `08713e56c526d027e429fc96d70f54274a5cb393`：Python job 成功，frontend job 在浏览器步骤失败，
+整体确实标为 Failure。公开页面只提供退出码，详细日志需要登录，公开日志路由返回 404。
+没有将其算作通过或跳过失败步骤。后续兼容修正明确使用 runner 官方提供的稳定 Google Chrome
+（其 Chromium 来自开发快照），使用可信 CDP 输入并等待 React 渲染，增加有界 CDP 等待与阶段注解，
+便于在公开页面诊断后续失败。无法从首次公开信息断言具体根因已经确认。
+修正后的本地六场景继续通过，云端后续运行状态以交付报告的对应 SHA 为准。
 本地通过不等于云端 CI 通过。如果 Fork 禁用 Actions，只需维护者在 GitHub 的 Actions 页面启用工作流；
 没有运行记录时，可在启用后创建本叠加 PR 触发 pull_request，或让 Codex 再提交正常变更触发 push。
 新工作流尚未进入默认分支时，不承诺 workflow_dispatch 网页按钮已可用。
