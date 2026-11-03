@@ -7,9 +7,12 @@ import argparse
 import asyncio
 import http.server
 import json
+import errno
+import os
 import re
 from pathlib import Path
 import shutil
+import signal
 import subprocess
 import tempfile
 import threading
@@ -139,7 +142,7 @@ def main():
         with tempfile.TemporaryDirectory(prefix="scholaros-browser-") as directory:
             profile = Path(directory)
             PHASE = "browser startup"
-            process = subprocess.Popen([chromium, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1", "--remote-debugging-port=0", "--user-data-dir=" + str(profile), "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            process = subprocess.Popen([chromium, "--headless=new", "--no-sandbox", "--disable-gpu", "--disable-dev-shm-usage", "--disable-background-networking", "--disable-component-update", "--disable-sync", "--no-first-run", "--no-default-browser-check", "--host-resolver-rules=MAP * ~NOTFOUND, EXCLUDE localhost, EXCLUDE 127.0.0.1", "--remote-debugging-port=0", "--user-data-dir=" + str(profile), "about:blank"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, start_new_session=True)
             try:
                 deadline = time.monotonic() + 15
                 while not (profile / "DevToolsActivePort").exists():
@@ -155,11 +158,30 @@ def main():
                     from browser_offline_smoke import exercise as scenario
                 asyncio.run(scenario(target["webSocketDebuggerUrl"], "http://127.0.0.1:" + str(server.server_port)))
             finally:
-                process.terminate()
+                scenario_phase = PHASE
+                PHASE = "browser process and profile cleanup"
+                # Chrome's children can outlive its launcher and keep writing
+                # Default/. A private process group lets us stop only this test.
+                def stop_group(sig):
+                    try: os.killpg(process.pid, sig)
+                    except ProcessLookupError: pass
+                stop_group(signal.SIGTERM)
                 try: process.wait(timeout=5)
                 except subprocess.TimeoutExpired:
-                    process.kill()
+                    stop_group(signal.SIGKILL)
                     process.wait(timeout=5)
+                stop_group(signal.SIGKILL)
+                deadline = time.monotonic() + 3
+                while True:
+                    try:
+                        shutil.rmtree(profile)
+                        break
+                    except FileNotFoundError:
+                        break
+                    except OSError as exc:
+                        if exc.errno != errno.ENOTEMPTY or time.monotonic() >= deadline: raise
+                        time.sleep(0.05)
+                PHASE = scenario_phase
     finally:
         server.shutdown()
         server.server_close()

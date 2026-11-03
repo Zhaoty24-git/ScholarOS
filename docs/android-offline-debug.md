@@ -20,6 +20,8 @@ Capacitor 版本、Node >=22 要求、包哈希来自官方 npm 元数据；Andr
 Gradle 发行及 wrapper 哈希分别由官方 `.sha256` 核实；wrapper 保留 Apache 版权声明。
 首次云端 Android 运行 `41621906822` 因 Kotlin stdlib 1.8.22 与 jdk7/jdk8 1.6.21
 重复类失败。按 Maven Central 已核实的 Kotlin BOM 1.8.22 对齐运行库，未跳过重复类检查。
+第二轮 `41622391609` 仍报重复类；随后将 Gradle 入口明确限定为 `:app:` 的构建/设备测试，
+避免构建依赖库自身的测试 APK，并增强失败任务诊断；应用的四项验收不减少。
 模板生成器只在临时目录运行；新增依赖写入 lock，既有锁定版本不变。
 安装执行 `npm ci --ignore-scripts`；完整依赖树唯一安装脚本属于 Darwin 可选 fsevents。
 App 插件仅用于生命周期、原生返回键与退出，无新增权限；替代方案是自写原生桥。
