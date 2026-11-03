@@ -31,6 +31,8 @@
   开发模式 Vite 5173 可连接本地后端。其他端口、远程域名与反向代理需要另行设计，不能使用通配符放行。
 - CORS 只约束浏览器读响应，不代替身份认证。Bearer 鉴权确认 owner 身份/权限；
   Origin 和 Fetch Metadata 检查、拒绝 Cookie 自动认证共同防止浏览器跨站触发操作。
+  精确允许的开发 Origin 可以跨 `localhost`/`127.0.0.1`，但仍需 Bearer；
+  不可信或缺少 Origin 的 `cross-site` 请求继续拒绝。
   合法 Origin 的请求同样必须携带令牌；无 Origin 的 CLI 请求也必须鉴权。
 - 设置状态仅返回“是否配置”，不再回传用户名、Key 片段、端点或 EXTRA_JSON 内容。
   API 不返回命令、内部路径字段、stdout/stderr 或原始诊断日志；解析异常只给出安全错误。
@@ -40,6 +42,9 @@
 - 全部请求体上限 21 MiB（包含 multipart 开销）；单个上传文件 20 MiB。
   读取上传文件使用有界块。最多两个同时执行的写请求，超出返回 429。
   此限制按进程生效，不限制已返回 queued 的后台子进程总数。
+  所有非 GET/HEAD/OPTIONS 方法在读取请求体前鉴权，包括健康检查路径和未知路径。
+  请求体读取总预算为 30 秒，断开、取消和超时都会释放槽位；校验实际长度与声明长度一致。
+  拒绝重复关键头、非法长度；无 Content-Length 时仍按实际字节数限制。
 - 原有页面中指向附件/资料文件、分块预览的部分路由在基线后端即不存在。
   本 PR 不补齐这些业务接口，也不把令牌塞进下载 URL；后续新增文件接口必须使用带鉴权的 fetch/Blob 下载。
 
@@ -55,12 +60,15 @@
 - 新保存的 Learn 会话保留 Cookie 域/路径并标为 Secure，拒绝不带作用域的旧字典格式。
   旧会话需要重新认证；本 PR 不自动迁移真实 Cookie。JWCH 恢复 Cookie 使用 Secure 标记，
   Info Cookie 导入仅允许精确 Info 域，拒绝扩大到父域。
+  保存的 MFA 事务最多恢复 10 分钟，过期、缺失或异常时间戳均拒绝，且不删除原文件。
 - 下载的 SM2 helper 只有匹配 `SCHOLAROS_SM2_SHA256` 才允许执行。管理员必须先独立审查 helper，
   再配置其 UTF-8 文本 SHA-256；不提供默认摘要、不自动接受新版本、不允许绕过校验。
   Node 子进程只继承 PATH，不继承服务令牌或其他凭据环境变量，密码仍经 stdin 传递。
 - 拒绝无 SM2 公钥时的原密码回退。认证表单和 SM2 脚本限 HTTPS 的
   `id.tsinghua.edu.cn`、`auth.cic.tsinghua.edu.cn`；拒绝 GET 方式的 Learn 凭据提交，
   密码表单 POST 禁用自动重定向，遇到重定向失败并要求单独审查。
+  两个 MFA 探测脚本的密码、OTP、信任设备 POST 也校验固定目的主机并拒绝重定向；
+  日志只记录 success 布尔值，不回显服务器的任意 result 字段。
 
 **真实登录为阻断性待办：**Learn/JWCH 表单、重定向、短信/企业微信 MFA、信任设备与 Cookie 兼容性
 均未进行真实验证。证据位置为 `LearnAdapter._login_with_password/_prepare_password`、
@@ -76,6 +84,11 @@
 - 下载强制 TLS 校验、5 秒连接/15 秒读取超时、120 秒流式处理总预算和 50 MiB 大小上限。
   `Content-Length` 与实际流式字节均检查；失败清理临时文件，异常不带 URL/凭据正文。
   超时总预算在块间检查，可能额外等待一次读取超时。
+- DNS 答案全部检查后，将实际 HTTPS 连接池固定到一个已验证的数字 IP。
+  Host、TLS SNI 和证书身份仍是原学堂域名；不再由 Requests 对原主机名重新解析。
+  HTTP CONNECT 代理会独立解析目的地址，本机无法证明其目标地址约束，因此当前实现对
+  已配置代理的附件传输安全拒绝，不会移除或绕过代理。**当前云环境的真实附件下载不可验收**；
+  需要后续审查能约束实际地址的代理传输方案。本地合成 TLS 回归验证了 SNI、证书与 Cookie 作用域。
 - 使用安全文件名和目录内临时文件；以不覆盖已有路径的方式发布文件，避免遍历及符号链接覆盖。
   响应的 Content-Disposition 不再决定本地路径。邮件附件落盘也采用独占创建并检查解码后大小。
   IMAP 原始邮件仍是整体获取，尚无协议级预取大小限制；需另行处理。
@@ -91,6 +104,13 @@
 禁止 Requests 真实外连。没有调用校园登录、外部 LLM 或下载语义模型。
 另外运行 `python scripts/run_harness.py` 和 `npm --prefix frontend run build`。
 前端请求 helper 回归运行 `npm --prefix frontend run test:security`，验证 JSON/上传请求头和锁定清除。
+锁定或重新授权会增加会话版本、取消待完成 fetch，并丢弃旧版本的 JSON 结果；
+旧业务操作不能借用新会话的令牌继续发送请求。401/503 会使页面重新锁定。
+已到达服务器的操作不能通过浏览器取消撤销；JSON 响应头已收到后的正文仍可能到达浏览器，但旧结果不会应用。
+复查新增的隔离/TLS/取消回归运行 `python -m unittest discover -s tests -p 'test_*.py' -v`。
+可用 Chromium 时运行 `python tests/browser_security_smoke.py`，仅启动本地合成 HTTP fixture，
+不部署应用后端。测试浏览器使用全新临时配置、禁用背景网络并阻断外部域名解析。
+`python tests/review_legacy_smoke.py` 报告旧脚本的实际失败，再只适配 TestClient Host/Token 重跑其 11 项原断言。
 旧 `verify_e_module.py` 未携带令牌，不能再作为未修改的验收入口；下一任务应统一适配隔离测试配置。
 
 剩余问题包括：恶意 PDF/Office/OCR 的 CPU/内存隔离、后台任务队列和进程总预算、

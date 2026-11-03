@@ -12,6 +12,7 @@ from typing import Any
 from backend.app.settings import settings
 from src.security import private_write
 from dotenv import dotenv_values
+from dotenv.parser import parse_stream
 import io
 
 _ENV_LOCK = threading.RLock()
@@ -112,22 +113,30 @@ def write_env_incremental(updates: dict[str, str | None], path: Path | None = No
             continue
         if value is None or (isinstance(value, str) and not value.strip()):
             continue
-        existing[key] = str(value).strip()
+        existing[key] = str(value)
         changed.append(key)
 
     # Remove all old definitions of updated keys, including duplicates.
     changed_keys = set(changed)
     lines = []
     if target.exists():
-        for raw_line in target.read_text(encoding="utf-8").splitlines():
-            key = raw_line.strip().split("=", 1)[0].strip()
-            if key.removeprefix("export ").strip() not in changed_keys:
-                lines.append(raw_line)
+        # Use the same dotenv grammar for editing and loading. splitlines()
+        # corrupts literal Unicode separators and misses quoted/export-tab keys.
+        for binding in parse_stream(io.StringIO(target.read_text(encoding="utf-8"))):
+            if binding.error:
+                raise ValueError("Invalid existing dotenv syntax")
+            if binding.key not in changed_keys:
+                lines.append(binding.original.string)
+    # Original bindings already include their own physical line endings.
+    original_text = "".join(lines)
+    if original_text and not original_text.endswith("\n"):
+        original_text += "\n"
+    lines = [original_text] if original_text else []
     for key in changed:
-        lines.append(f"{key}={_quote_env(existing[key])}")
+        lines.append(f"{key}={_quote_env(existing[key])}\n")
 
     target.parent.mkdir(parents=True, exist_ok=True)
-    private_write(target, "\n".join(lines) + "\n")
+    private_write(target, "".join(lines))
 
     # Refresh process env for keys we just wrote
     for key in updates:

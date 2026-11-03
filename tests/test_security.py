@@ -235,8 +235,12 @@ class DownloadTests(unittest.TestCase):
         self.response.iter_content.return_value = [b"synthetic content"]
         self.response.__enter__ = Mock(return_value=self.response)
         self.response.__exit__ = Mock(return_value=False)
-        self.session = Mock()
-        self.session.get.return_value = self.response
+        import requests
+        self.session = requests.Session()
+        # Synthetic direct-transport test configuration only. Production never
+        # clears proxy settings: configured proxy downloads fail closed.
+        self.session.trust_env = False
+        self.transport_send = self.enterContext(patch.object(downloads._PinnedHTTPSAdapter, "send", return_value=self.response))
 
     def download(self, filename="sample.pdf", url="https://learn.tsinghua.edu.cn/file.pdf"):
         return downloads.download_attachment(self.session, url, self.root, filename, headers={"X-XSRF-TOKEN": "synthetic"})
@@ -246,28 +250,29 @@ class DownloadTests(unittest.TestCase):
         self.assertEqual(path.read_bytes(), b"synthetic content")
         self.assertEqual(count, 17)
         self.assertEqual(mime, "application/pdf")
-        self.assertFalse(self.session.get.call_args.kwargs["allow_redirects"])
-        self.assertTrue(self.session.get.call_args.kwargs["stream"])
-        self.assertEqual(self.session.get.call_args.kwargs["timeout"], (5, 15))
-        self.assertTrue(self.session.get.call_args.kwargs["verify"])
+        # Adapter.send does not follow redirects; all 3xx responses are rejected.
+        self.assertEqual(self.transport_send.call_args.args[0].url, "https://learn.tsinghua.edu.cn/file.pdf")
+        self.assertTrue(self.transport_send.call_args.kwargs["stream"])
+        self.assertEqual(self.transport_send.call_args.kwargs["timeout"], (5, 15))
+        self.assertTrue(self.transport_send.call_args.kwargs["verify"])
 
     def test_untrusted_urls_never_receive_session(self):
         for url in ["http://learn.tsinghua.edu.cn/a", "https://127.0.0.1/a", "https://169.254.169.254/a", "https://learn.tsinghua.edu.cn.attacker.invalid/a", "https://learn.tsinghua.edu.cn@attacker.invalid/a", "https://user@learn.tsinghua.edu.cn/a", "file:///etc/passwd", "https://learn.tsinghua.edu.cn:444/a", "https://learn.tsinghua.edu.cn/\\evil", "https://learn.tsinghua.edu.cn/\na"]:
             with self.subTest(url=url), self.assertRaises(downloads.DownloadError): self.download(url=url)
-        self.session.get.assert_not_called()
+        self.transport_send.assert_not_called()
 
     def test_redirects_refused_without_forwarding(self):
         for code in [301, 302, 303, 307, 308]:
             self.response.status_code = code
             self.response.headers = {"Location": "http://169.254.169.254/private"}
             with self.assertRaises(downloads.DownloadError): self.download()
-        self.assertEqual(self.session.get.call_count, 5)
+        self.assertEqual(self.transport_send.call_count, 5)
         self.assertFalse(list(self.root.iterdir()))
 
     def test_private_dns_refused(self):
         with patch.object(downloads.socket, "getaddrinfo", return_value=[(2, 1, 6, "", ("127.0.0.1", 443))]):
             with self.assertRaises(downloads.DownloadError): self.download()
-        self.session.get.assert_not_called()
+        self.transport_send.assert_not_called()
 
     def test_declared_download_limit(self):
         self.response.headers = {"Content-Length": str(downloads.MAX_DOWNLOAD_BYTES + 1)}
@@ -290,7 +295,7 @@ class DownloadTests(unittest.TestCase):
         self.assertFalse(list(self.root.iterdir()))
 
     def test_timeout_errors_do_not_echo_urls(self):
-        self.session.get.side_effect = TimeoutError("synthetic-private-marker")
+        self.transport_send.side_effect = TimeoutError("synthetic-private-marker")
         with self.assertRaises(downloads.DownloadError) as caught: self.download()
         self.assertNotIn("synthetic-private-marker", str(caught.exception))
 

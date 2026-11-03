@@ -1,6 +1,7 @@
 """Single-owner API boundary. CORS is not authentication or CSRF protection."""
 from __future__ import annotations
 
+import asyncio
 import hmac
 import os
 import json
@@ -16,6 +17,7 @@ from starlette.responses import JSONResponse
 
 _MUTATIONS = threading.BoundedSemaphore(2)
 
+REQUEST_BODY_TIMEOUT_SECONDS = 30
 MAX_REQUEST_BYTES = 21 * 1024 * 1024  # includes multipart framing
 
 
@@ -79,8 +81,9 @@ class SecurityBoundary:
             return await self.app(scope, receive, send)
         headers = {k.decode("latin1").lower(): v.decode("latin1") for k, v in scope["headers"]}
         path = scope["path"]
-        protected = path.startswith("/api/") and path != "/api/health"
-        protected = protected or path in {"/docs", "/redoc", "/openapi.json"}
+        mutation = scope["method"] not in {"GET", "HEAD", "OPTIONS"}
+        protected = mutation or (path.startswith("/api/") and path != "/api/health")
+        protected = protected or any(path == p or path.startswith(p + "/") for p in ("/docs", "/redoc", "/openapi.json"))
 
         async def secure_send(message):
             if message["type"] == "http.response.start":
@@ -95,12 +98,24 @@ class SecurityBoundary:
             await send(message)
 
         async def reject(code, message):
-            return await JSONResponse({"detail": message}, status_code=code)(scope, receive, secure_send)
+            response = JSONResponse({"detail": message}, status_code=code)
+            # This middleware rejects before inner CORSMiddleware runs. Trusted
+            # development pages must still be able to observe 401/503 and lock.
+            # Untrusted origins receive no CORS permission.
+            origin = headers.get("origin")
+            if origin in allowed_origins():
+                response.headers["access-control-allow-origin"] = origin
+                response.headers["vary"] = "Origin"
+            return await response(scope, receive, secure_send)
 
+        critical = {"authorization", "origin", "host", "content-length", "sec-fetch-site"}
+        for name in critical:
+            if sum(k.decode("latin1").lower() == name for k, _ in scope["headers"]) > 1:
+                return await reject(400, "Ambiguous request headers")
         origin = headers.get("origin")
         if origin is not None and origin not in allowed_origins():
             return await reject(403, "Untrusted origin")
-        if headers.get("sec-fetch-site") == "cross-site":
+        if headers.get("sec-fetch-site") == "cross-site" and origin not in allowed_origins():
             return await reject(403, "Cross-site request denied")
         if protected:
             token = os.getenv("SCHOLAROS_API_TOKEN", "")
@@ -109,12 +124,15 @@ class SecurityBoundary:
             supplied = headers.get("authorization", "")
             if scope["method"] != "OPTIONS" and not hmac.compare_digest(supplied.encode(), ("Bearer " + token).encode()):
                 return await reject(401, "Authorization required")
-        try:
-            if int(headers.get("content-length", "0")) > MAX_REQUEST_BYTES:
+        declared_length = None
+        if "content-length" in headers:
+            if not re.fullmatch(r"[0-9]+", headers["content-length"]):
+                return await reject(400, "Invalid request length")
+            if len(headers["content-length"]) > 10:
                 return await reject(413, "Request too large")
-        except ValueError:
-            return await reject(400, "Invalid request length")
-        mutation = scope["method"] not in {"GET", "HEAD", "OPTIONS"}
+            declared_length = int(headers["content-length"])
+            if declared_length > MAX_REQUEST_BYTES:
+                return await reject(413, "Request too large")
         if not mutation:
             return await self.app(scope, receive, secure_send)
         if not _MUTATIONS.acquire(blocking=False):
@@ -123,8 +141,13 @@ class SecurityBoundary:
             # Bound the stream before Starlette's multipart parser can spool it.
             size = 0
             body = bytearray()
+            deadline = asyncio.get_running_loop().time() + REQUEST_BODY_TIMEOUT_SECONDS
             while True:
-                message = await receive()
+                remaining = deadline - asyncio.get_running_loop().time()
+                try:
+                    message = await asyncio.wait_for(receive(), timeout=max(0, remaining))
+                except asyncio.TimeoutError:
+                    return await reject(408, "Request body timed out")
                 if message["type"] == "http.disconnect":
                     return
                 size += len(message.get("body", b""))
@@ -134,6 +157,8 @@ class SecurityBoundary:
                 if not message.get("more_body", False):
                     break
 
+            if declared_length is not None and size != declared_length:
+                return await reject(400, "Request length mismatch")
             received = False
             async def bounded_receive():
                 nonlocal received

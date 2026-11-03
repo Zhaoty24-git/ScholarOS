@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { apiGet, apiPost, apiUrl, apiFetch, setAccessToken } from "./api";
+import { apiGet, apiPost, apiUrl, setAccessToken, sessionRevision, onSessionInvalidated, createSessionClient } from "./api";
 
 type AnyRecord = Record<string, any>;
 type TaskView = "pending" | "homework" | "all";
@@ -67,26 +67,38 @@ export function App() {
   const [authorized, setAuthorized] = useState(false);
   const [token, setToken] = useState("");
   const [loginError, setLoginError] = useState("");
+  const [connecting, setConnecting] = useState(false);
+  useEffect(() => onSessionInvalidated(() => {
+    setAuthorized(false); setToken(""); setConnecting(false);
+    setLoginError("会话已锁定，请重新授权。");
+  }), []);
   if (authorized) return <><button onClick={() => { setAccessToken(""); setAuthorized(false); }}>锁定会话</button><AuthenticatedApp /></>;
   return <main className="app"><form onSubmit={async (event) => {
     event.preventDefault();
-    setAccessToken(token);
+    const started = setAccessToken(token);
+    setConnecting(true);
     try {
       await apiGet("/api/settings/status");
-      setToken(""); setAuthorized(true); setLoginError("");
+      if (sessionRevision() === started) {
+        setToken(""); setAuthorized(true); setLoginError("");
+      }
     } catch {
-      setAccessToken(""); setLoginError("连接失败：请检查后端与访问令牌。");
+      if (sessionRevision() === started) setAccessToken("");
+      setLoginError("连接失败：请检查后端与访问令牌。");
+    } finally {
+      setConnecting(false);
     }
   }}>
     <h1>ScholarOS</h1>
     <label>访问令牌 <input type="password" autoComplete="off" value={token} onChange={(event) => setToken(event.target.value)} required /></label>
-    <button type="submit">连接</button>
+    <button type="submit" disabled={connecting}>{connecting ? "连接中…" : "连接"}</button>
     <p>令牌仅保留在当前页面内存中，刷新后需要重新输入。</p>
     {loginError && <p role="alert">{loginError}</p>}
   </form></main>;
 }
 
 function AuthenticatedApp() {
+  const { apiGet, apiPost, apiUpload } = useMemo(() => createSessionClient(), []);
   const [active, setActive] = useState<(typeof pages)[number]["id"]>("home");
   const [dashboard, setDashboard] = useState<AnyRecord | null>(null);
   const [tasks, setTasks] = useState<AnyRecord[]>([]);
@@ -264,7 +276,7 @@ function AuthenticatedApp() {
     setSyncMessage("正在同步网络学堂...");
     setError(null);
     try {
-      const before = await learnSyncTimestamp();
+      const before = await learnSyncTimestamp(apiGet);
       await apiPost("/api/sync/run", {
         channel: "learn",
         allow_network: true,
@@ -272,7 +284,7 @@ function AuthenticatedApp() {
       });
       for (let attempt = 0; attempt < 60; attempt += 1) {
         await delay(2000);
-        const after = await learnSyncTimestamp();
+        const after = await learnSyncTimestamp(apiGet);
         if (after && after !== before) {
           await refreshData();
           setSyncMessage("已同步到最新，下一步请构建知识库");
@@ -334,11 +346,7 @@ function AuthenticatedApp() {
     try {
       const formData = new FormData();
       formData.append("file", file);
-      const response = await apiFetch("/api/upload", { method: "POST", body: formData });
-      const data = await response.json() as AnyRecord;
-      if (!response.ok) {
-        throw new Error(data.detail ?? data.message ?? `上传失败: ${response.status}`);
-      }
+      const data = await apiUpload<AnyRecord>("/api/upload", formData);
       setUploadedFiles((prev) =>
         prev.map((f) =>
           f.id === entry.id
@@ -1499,8 +1507,8 @@ function isFutureDeadline(value: unknown): boolean {
   return typeof value === "string" && new Date(value).getTime() >= Date.now();
 }
 
-async function learnSyncTimestamp(): Promise<string> {
-  const status = await apiGet<AnyRecord>("/api/sync/status");
+async function learnSyncTimestamp(get = apiGet): Promise<string> {
+  const status = await get<AnyRecord>("/api/sync/status");
   return String(status.items?.find((item: AnyRecord) => item.channel === "learn")?.last_synced_at ?? "");
 }
 

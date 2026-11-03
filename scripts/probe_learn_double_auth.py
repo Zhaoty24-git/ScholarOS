@@ -18,7 +18,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from src.adapters.learn_adapter import LearnAdapter, discover_auth_form_url, select_login_form
-from src.security import private_write
+from src.security import private_write, auth_post, validate_session_age
 from src.env_loader import load_project_env
 
 
@@ -62,6 +62,10 @@ def load_session(adapter: LearnAdapter):
     if not SESSION_PATH.exists():
         raise SystemExit("No saved double-auth session. Run start first.")
     data = json.loads(SESSION_PATH.read_text(encoding="utf-8"))
+    try:
+        validate_session_age(data)
+    except ValueError as exc:
+        raise SystemExit(str(exc)) from None
     session = adapter._build_session()
     cookies = data.get("cookies")
     if not isinstance(cookies, list):
@@ -92,21 +96,21 @@ def start_double_auth(kind: str) -> int:
     payload = dict(form.get("inputs", {}))
     payload["i_user"] = adapter.require("username")
     payload["i_pass"] = adapter._prepare_password(auth.url, auth.text)
-    login = session.post(urljoin(auth.url, str(form.get("action") or "")), data=payload, timeout=20)
+    login = auth_post(session, urljoin(auth.url, str(form.get("action") or "")), data=payload, timeout=20)
     login.raise_for_status()
 
-    approaches = session.post(DOUBLE_AUTH_URL, data={"action": "FIND_APPROACHES"}, timeout=20)
+    approaches = auth_post(session, DOUBLE_AUTH_URL, data={"action": "FIND_APPROACHES"}, timeout=20)
     approaches.raise_for_status()
     approach_data = approaches.json()
     if approach_data.get("result") != "success":
         raise SystemExit("Double-auth approach discovery failed.")
 
-    send = session.post(DOUBLE_AUTH_URL, data={"action": "SEND_CODE", "type": kind}, timeout=20)
+    send = auth_post(session, DOUBLE_AUTH_URL, data={"action": "SEND_CODE", "type": kind}, timeout=20)
     send.raise_for_status()
     send_data = send.json()
     save_session(session, auth_url=auth.url, auth_html=auth.text)
 
-    print(f"double_auth_start result={send_data.get('result')} msg_present={bool(send_data.get('msg'))}")
+    print(f"double_auth_start success={send_data.get('result') == 'success'} msg_present={bool(send_data.get('msg'))}")
     print(f"session_saved={SESSION_PATH}")
     return 0 if send_data.get("result") == "success" else 2
 
@@ -116,15 +120,15 @@ def verify_double_auth(code: str, *, trust_device: bool, device_name: str) -> in
     adapter = LearnAdapter()
     session, data = load_session(adapter)
 
-    verify = session.post(DOUBLE_AUTH_URL, data={"action": "VERITY_CODE", "vericode": code}, timeout=20)
+    verify = auth_post(session, DOUBLE_AUTH_URL, data={"action": "VERITY_CODE", "vericode": code}, timeout=20)
     verify.raise_for_status()
     verify_data = verify.json()
-    print(f"double_auth_verify result={verify_data.get('result')} msg_present={bool(verify_data.get('msg'))}")
+    print(f"double_auth_verify success={verify_data.get('result') == 'success'} msg_present={bool(verify_data.get('msg'))}")
     if verify_data.get("result") != "success":
         return 2
 
     if trust_device:
-        trust = session.post(
+        trust = auth_post(session,
             "https://id.tsinghua.edu.cn/b/doubleAuth/personal/saveFinger",
             data={
                 "fingerprint": "CourseAgentCollector",
@@ -138,7 +142,7 @@ def verify_double_auth(code: str, *, trust_device: bool, device_name: str) -> in
         trust_data = trust.json()
         TRUST_PATH.parent.mkdir(parents=True, exist_ok=True)
         private_write(TRUST_PATH, json.dumps(trust_data, ensure_ascii=False))
-        print(f"trust_device result={trust_data.get('result')} msg_present={bool(trust_data.get('msg'))}")
+        print(f"trust_device success={trust_data.get('result') == 'success'} msg_present={bool(trust_data.get('msg'))}")
 
     final = session.get(adapter.require("base_url"), timeout=20)
     final.raise_for_status()

@@ -1,6 +1,7 @@
 """Fixed-origin, bounded attachment downloads. No automatic redirects."""
 from __future__ import annotations
 
+from contextlib import contextmanager
 import ipaddress
 import os
 import socket
@@ -8,6 +9,11 @@ import tempfile
 import time
 from pathlib import Path
 from urllib.parse import urlsplit
+
+from requests import Request
+from requests.adapters import HTTPAdapter
+from requests.utils import select_proxy
+from urllib3 import HTTPSConnectionPool
 
 MAX_DOWNLOAD_BYTES = 50 * 1024 * 1024
 LEARN_HOST = "learn.tsinghua.edu.cn"
@@ -30,10 +36,60 @@ def validate_download_url(url: str) -> str:
     return url
 
 
+class _PinnedHTTPSAdapter(HTTPAdapter):
+    """Connect to a numeric validated address while verifying the original host.
+
+    Requests 2.31 calls get_connection; 2.32+ calls the TLS-context variant.
+    Neither path may resolve the campus hostname again or select a proxy.
+    """
+    def __init__(self, address: str):
+        self._pool = HTTPSConnectionPool(address, port=443,
+                                       assert_hostname=LEARN_HOST,
+                                       server_hostname=LEARN_HOST)
+        super().__init__(max_retries=0)
+
+    def get_connection(self, url, proxies=None):
+        if select_proxy(url, proxies or {}):
+            raise DownloadError("Attachment proxy transport requires separate review")
+        return self._pool
+
+    def get_connection_with_tls_context(self, request, verify, proxies=None, cert=None):
+        return self.get_connection(request.url, proxies)
+
+    def close(self):
+        self._pool.close()
+        super().close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *args):
+        self.close()
+
+
+@contextmanager
+def _open_download(session, url, headers, address):
+    settings = session.merge_environment_settings(url, {}, True, True, None)
+    # An HTTP CONNECT proxy resolves the hostname outside this process. Local
+    # DNS checks cannot constrain it. Do not bypass an inherited proxy or claim
+    # pinning through it: refuse until an enforceable proxy contract is provided.
+    if select_proxy(url, settings["proxies"]):
+        raise DownloadError("Attachment proxy transport requires separate review")
+    request_headers = {**(headers or {}), "Host": LEARN_HOST, "Accept-Encoding": "identity"}
+    prepared = session.prepare_request(Request("GET", url, headers=request_headers))
+    with _PinnedHTTPSAdapter(address) as adapter:
+        response = adapter.send(prepared, stream=True, timeout=(5, 15),
+                                verify=settings["verify"], cert=settings["cert"], proxies={})
+        try:
+            yield response
+        finally:
+            response.close()
+
+
 def download_attachment(session, url: str, output_dir: Path, filename: str, *, headers=None) -> tuple[Path, int, str]:
     validate_download_url(url)
-    # Defence in depth against private-address resolution; HTTPS certificate
-    # validation and the fixed administratively trusted host remain mandatory.
+    # Validate every answer, then pin the actual socket target to one answer.
+    # The HTTP Host, TLS SNI and certificate identity remain the campus hostname.
     try:
         addresses = socket.getaddrinfo(LEARN_HOST, 443, type=socket.SOCK_STREAM)
         if not addresses or any(not ipaddress.ip_address(a[4][0]).is_global for a in addresses):
@@ -50,7 +106,7 @@ def download_attachment(session, url: str, output_dir: Path, filename: str, *, h
     temporary = None
     started = time.monotonic()
     try:
-        with session.get(url, headers=headers or {}, timeout=(5, 15), stream=True, allow_redirects=False, verify=True) as response:
+        with _open_download(session, url, headers, addresses[0][4][0]) as response:
             if response.status_code != 200:
                 raise DownloadError("Attachment download refused")
             if response.headers.get("Content-Encoding", "identity").lower() != "identity":

@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import os
 import tempfile
+import time
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import urlsplit
 
@@ -16,6 +18,28 @@ def validate_auth_url(url: str) -> str:
             or any(ord(c) < 33 for c in url)):
         raise ValueError("Untrusted authentication URL")
     return url
+
+
+def auth_post(session, url: str, *, data, timeout=20):
+    """Never let a password, OTP or trust request follow a 307/308 redirect."""
+    validate_auth_url(url)
+    try:
+        response = session.post(url, data=data, timeout=timeout, allow_redirects=False)
+        if not 200 <= response.status_code < 300:
+            raise ValueError("Authentication request refused")
+        return response
+    except Exception:
+        raise ValueError("Authentication request refused") from None
+
+
+def validate_session_age(data: dict) -> None:
+    """A saved MFA transaction is short lived, not a permanent login token."""
+    try:
+        age = time.time() - datetime.fromisoformat(data["created_at"]).timestamp()
+        if not -60 <= age <= 600:
+            raise ValueError
+    except (KeyError, TypeError, ValueError, OverflowError):
+        raise ValueError("Saved authentication session expired; restart authentication") from None
 
 
 def private_write(path: Path, text: str) -> None:
