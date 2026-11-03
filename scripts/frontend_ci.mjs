@@ -8,13 +8,15 @@ import { randomUUID } from "node:crypto";
 import { verifyArtifact, publishArtifact } from "./check_frontend_artifact.mjs";
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
+const android = process.argv.includes("--android");
 const stage = await mkdtemp(resolve(tmpdir(), "scholaros-frontend-"));
 try {
   const paths = execFileSync("git", ["ls-files", "-z", "--", "frontend"], { cwd: root, encoding: "utf8" }).split("\0").filter(Boolean);
   if (!paths.includes("frontend/package-lock.json")) throw new Error("Frontend lock missing");
   for (const path of paths) {
     const name = relative("frontend", path);
-    if (name.startsWith("..") || /(?:^|\/)(?:\.env(?:\..*)?|node_modules|dist)(?:\/|$)/.test(name)) throw new Error("Unsafe tracked frontend input");
+    if (name.startsWith("android/")) continue; // Native sources are not Vite input.
+    if (name.startsWith("..") || /(?:^|\/)(?:\.env(?:\..*)?|node_modules|dist|dist-android)(?:\/|$)/.test(name)) throw new Error("Unsafe tracked frontend input");
     const source = resolve(root, path);
     if ((await lstat(source)).isSymbolicLink()) throw new Error("Frontend source symlink");
     await mkdir(dirname(resolve(stage, name)), { recursive: true });
@@ -37,13 +39,15 @@ try {
   run("npm", ["--version"]);
   run("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"]);
   run("npm", ["run", "test:security"]);
+  run("npm", ["run", "test:offline"]);
   run("node", ["node_modules/typescript/bin/tsc", "--noEmit"]);
-  run("npm", ["run", "build"]);
-  const manifest = await verifyArtifact(resolve(stage, "dist"), canary);
+  run("npm", ["run", android ? "build:android" : "build"]);
+  const dist = resolve(stage, android ? "dist-android" : "dist");
+  const manifest = await verifyArtifact(dist, canary, android ? "/" : "/app/");
   const outputFlag = process.argv.indexOf("--output");
   if (outputFlag !== -1) {
     if (!process.argv[outputFlag + 1]) throw new Error("Output path required");
-    await publishArtifact(resolve(stage, "dist"), process.argv[outputFlag + 1], root);
+    await publishArtifact(dist, process.argv[outputFlag + 1], root);
   }
   console.log(JSON.stringify({ artifact_verified: true, files: manifest }));
 } finally {

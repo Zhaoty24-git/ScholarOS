@@ -2,7 +2,7 @@ name: ScholarOS Offline CI
 
 on:
   push:
-    branches: [main, codex/ci-offline-tests-pr2]
+    branches: [main, codex/ci-offline-tests-pr2, codex/android-offline-apk-pr3]
   pull_request:
   workflow_dispatch:
 
@@ -76,3 +76,7 @@ jobs:
         run: node scripts/frontend_ci.mjs --output "$RUNNER_TEMP/scholaros-frontend-dist"
       - name: Local synthetic browser scenarios
         run: python tests/browser_security_smoke.py --browser google-chrome --dist "$RUNNER_TEMP/scholaros-frontend-dist"
+      - name: Independent Android offline bundle
+        run: node scripts/frontend_ci.mjs --android --output "$RUNNER_TEMP/scholaros-offline-dist"
+      - name: Mobile offline navigation without backend or network
+        run: python tests/browser_security_smoke.py --browser google-chrome --offline --dist "$RUNNER_TEMP/scholaros-offline-dist"

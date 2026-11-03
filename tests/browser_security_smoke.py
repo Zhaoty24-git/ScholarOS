@@ -26,6 +26,7 @@ FIXTURE_TOKEN = "".join(["synthetic-browser-", "x" * 40])
 
 class Fixture(http.server.BaseHTTPRequestHandler):
     static_root = ROOT / "frontend/dist"
+    base_path = "/app/"
     revoked = False
     api_calls = 0
     def log_message(self, *args): pass
@@ -38,7 +39,7 @@ class Fixture(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(json.dumps({"status": "ready", "fields": {}, "items": [], "stats": {}}).encode())
             return
-        relative = self.path.split("?", 1)[0].removeprefix("/app/")
+        relative = self.path.split("?", 1)[0].removeprefix(type(self).base_path)
         file = (type(self).static_root / (relative or "index.html")).resolve()
         if not file.is_relative_to(type(self).static_root) or not file.is_file():
             self.send_error(404)
@@ -121,8 +122,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--browser", help="Explicit browser executable, e.g. google-chrome on GitHub runners")
     parser.add_argument("--dist", type=Path, default=ROOT / "frontend/dist")
+    parser.add_argument("--offline", action="store_true", help="Exercise the independent Android offline bundle")
     args = parser.parse_args()
     Fixture.static_root = args.dist.resolve()
+    Fixture.base_path = "/" if args.offline else "/app/"
     candidates = [args.browser] if args.browser else ["google-chrome", "google-chrome-stable", "chromium", "chromium-browser"]
     chromium = next((path for name in candidates if (path := shutil.which(name))), None)
     if not chromium: raise RuntimeError("Chromium required; browser checks were not run")
@@ -147,7 +150,10 @@ def main():
                 port = (profile / "DevToolsActivePort").read_text().splitlines()[0]
                 with urllib.request.urlopen("http://127.0.0.1:" + port + "/json/list", timeout=3) as response:
                     target = next(t for t in json.load(response) if t["type"] == "page")
-                asyncio.run(exercise(target["webSocketDebuggerUrl"], "http://127.0.0.1:" + str(server.server_port)))
+                scenario = exercise
+                if args.offline:
+                    from browser_offline_smoke import exercise as scenario
+                asyncio.run(scenario(target["webSocketDebuggerUrl"], "http://127.0.0.1:" + str(server.server_port)))
             finally:
                 process.terminate()
                 try: process.wait(timeout=5)

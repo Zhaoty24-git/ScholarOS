@@ -1,0 +1,7 @@
+{
+  "appId": "com.scholaros.app",
+  "appName": "ScholarOS",
+  "webDir": "dist-android",
+  "server": { "androidScheme": "https", "cleartext": false },
+  "android": { "allowMixedContent": false, "webContentsDebuggingEnabled": false }
+}
