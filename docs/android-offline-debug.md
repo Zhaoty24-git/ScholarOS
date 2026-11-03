@@ -26,6 +26,7 @@ Gradle 发行及 wrapper 哈希分别由官方 `.sha256` 核实；wrapper 保留
 安装执行 `npm ci --ignore-scripts`；完整依赖树唯一安装脚本属于 Darwin 可选 fsevents。
 App 插件仅用于生命周期、原生返回键与退出，无新增权限；替代方案是自写原生桥。
 模板/插件 MIT 许可见 Android THIRD_PARTY_NOTICES.md；原仓库 LICENSE 不变。
+APK 内 `assets/NOTICE.txt` 同时保留上游作者、Capacitor 与 React 的完整 MIT 声明。
 
 ## 入口、功能与隐私
 
@@ -40,6 +41,10 @@ Android 使用 `offline/index.html` → `src/offline/main.tsx` 与 `model.ts`，
 日期按启动时钟生成，只保留在内存，所有内容均为合成演示。
 
 Android Manifest 无网络/存储/账号/相机/通知权限；CSP `connect-src 'none'`。
+AndroidX Core 1.17.0 的官方 AAR Manifest 会合并应用自己的
+`com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION` 签名级权限，用于保护旧系统的
+动态广播接收器。这不是联网/存储/账号权限；APK 检查只允许此项，且验证 protectionLevel=signature。
+第三轮 `41622881648` 已实际编译成功，原先“任何权限都拒绝”的检查在此处阻断，未上传产物。
 Capacitor 在 WebView 内拦截 `https://localhost` 的打包静态资源，不启动网络服务。
 不含远程开发地址或登录框，不打包账号/Cookie/Token/LLM Key/私人课程。
 Python 不随 APK 运行；当前离线模式不需要长期服务器。

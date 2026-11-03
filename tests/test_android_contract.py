@@ -6,11 +6,25 @@ import unittest
 import xml.etree.ElementTree as ET
 from scripts.check_ci_policy import validate_android
 from scripts.check_android_test_results import check
+from scripts.verify_android_apk import verify_permissions
 
 ROOT = Path(__file__).resolve().parents[1]
 
 
 class AndroidContractTests(unittest.TestCase):
+    def test_actual_system_network_permission_rejected(self):
+        with self.assertRaises(ValueError): verify_permissions("uses-permission: name='android.permission.INTERNET'", "")
+
+    def test_androidx_private_signature_permission_accepted(self):
+        name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        tree = 'E: permission (line=18)\n  A: android:name="' + name + '"\n  A: android:protectionLevel=(type 0x11)0x2\nE: application'
+        self.assertEqual(verify_permissions("uses-permission: name='" + name + "'", tree), [name])
+
+    def test_androidx_permission_without_signature_rejected(self):
+        name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        tree = 'E: permission (line=18)\n  A: android:name="' + name + '"\n  A: android:protectionLevel=(type 0x11)0x0'
+        with self.assertRaises(ValueError): verify_permissions("uses-permission: name='" + name + "'", tree)
+
     def test_manifest_has_no_permissions_and_real_launcher(self):
         manifest = ET.parse(ROOT / "frontend/android/app/src/main/AndroidManifest.xml").getroot()
         self.assertEqual(manifest.findall("uses-permission"), [])

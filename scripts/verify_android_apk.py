@@ -13,6 +13,19 @@ import subprocess
 import zipfile
 
 
+def verify_permissions(badging, tree):
+    permissions = sorted(set(re.findall(r"uses-permission[^:]*: name='([^']+)'", badging)))
+    internal = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+    if set(permissions) - {internal}:
+        raise ValueError("Unexpected offline APK permissions: " + ", ".join(permissions))
+    if internal in permissions:
+        blocks = re.split(r"\n(?=\s*E:)", tree)
+        if not any("E: permission " in block and internal in block and
+                   re.search(r"android:protectionLevel[^\n]*0x0*2\b", block) for block in blocks):
+            raise ValueError("AndroidX internal receiver permission must be signature-only")
+    return permissions
+
+
 def inspect(apk, tools, commit):
     if not re.fullmatch(r"[0-9a-f]{40}", commit): raise ValueError("Full build commit required")
     if not apk.is_file() or not 100_000 <= apk.stat().st_size <= 30_000_000: raise ValueError("Missing or unexpected APK size")
@@ -21,7 +34,7 @@ def inspect(apk, tools, commit):
     badging = run("aapt2", "dump", "badging")
     expected = "package: name='com.scholaros.app' versionCode='1' versionName='0.1.0-dev'"
     if expected not in badging or "launchable-activity: name='com.scholaros.app.MainActivity'" not in badging: raise ValueError("Unexpected package or launcher")
-    if "uses-permission" in badging: raise ValueError("Offline APK must have no permissions")
+    permissions = verify_permissions(badging, run("aapt2", "dump", "xmltree", "--file", "AndroidManifest.xml"))
     if "sdkVersion:'24'" not in badging or "targetSdkVersion:'36'" not in badging: raise ValueError("Unexpected Android SDK configuration")
     signature = run("apksigner", "verify", "--verbose", "--print-certs")
     if "CN=Android Debug" not in signature: raise ValueError("Only Debug signing expected")
@@ -34,6 +47,9 @@ def inspect(apk, tools, commit):
         assets = [n for n in names if n.startswith("assets/")]
         forbidden = re.compile(r"(?:^|/)(?:\.env(?:\..*)?|[^/]*\.(?:db|sqlite3?|jsonl|jks|keystore)|cookies?[^/]*|sessions?[^/]*|credentials?[^/]*)$", re.I)
         if any(forbidden.search(n) for n in names): raise ValueError("Private file in APK")
+        notice = archive.read("assets/NOTICE.txt").decode()
+        if "2026 fnoi16wjhui" not in notice or "Meta Platforms" not in notice or "Drifty Co." not in notice:
+            raise ValueError("Missing upstream/runtime license notices")
         config = json.loads(archive.read("assets/capacitor.config.json"))
         if config.get("appId") != "com.scholaros.app" or config.get("server", {}).get("url") or config.get("server", {}).get("cleartext") is not False: raise ValueError("Unsafe Capacitor server configuration")
         html = archive.read("assets/public/index.html").decode()
@@ -49,7 +65,7 @@ def inspect(apk, tools, commit):
     return {"commit": commit, "file": "ScholarOS-0.1.0-dev-debug.apk", "bytes": apk.stat().st_size,
             "sha256": checksum, "applicationId": "com.scholaros.app",
             "versionCode": 1, "versionName": "0.1.0-dev", "minSdk": 24, "targetSdk": 36,
-            "signing": "Android Debug", "certificate_sha256": cert.group(1), "permissions": [], "zip_integrity": "passed"}
+            "signing": "Android Debug", "certificate_sha256": cert.group(1), "permissions": permissions, "zip_integrity": "passed"}
 
 
 def main():
