@@ -19,8 +19,18 @@ import "./styles.css";
 
 const demo = makeDemo();
 const aiContexts: ContextAttachment[] = [
-  ...courses.map(c => ({ provenance: "synthetic_demo" as const, label: c.name, text: `${c.name}\n${c.description}` })),
-  ...demo.assignments.slice(0, 6).map(t => ({ provenance: "synthetic_demo" as const, label: t.title, text: `课程：${t.courseId}\n作业：${t.title}\n${t.body}\n截止：${t.deadline || "待定"}` })),
+  ...courses.map((c) => ({
+    provenance: "synthetic_demo" as const,
+    label: c.name,
+    text: `${c.name}\n${c.description}`,
+  })),
+  ...demo.assignments
+    .slice(0, 6)
+    .map((t) => ({
+      provenance: "synthetic_demo" as const,
+      label: t.title,
+      text: `课程：${t.courseId}\n作业：${t.title}\n${t.body}\n截止：${t.deadline || "待定"}`,
+    })),
 ];
 const course = (id: string) => courses.find((c) => c.id === id)!;
 const icons = [
@@ -229,7 +239,11 @@ export function OfflineApp() {
           <div className="page-heading">
             <span className="eyebrow">SCHOLAROS / OFFLINE</span>
             <h1>{title}</h1>
-            <p className="subtitle">{page === "ai" ? "主动提问 · 设备端直连 Agnes · 请核对 AI 回答" : "合成数据 · 仅供离线体验"}</p>
+            <p className="subtitle">
+              {page === "ai"
+                ? "主动提问 · 设备端直连 Agnes · 请核对 AI 回答"
+                : "合成数据 · 仅供离线体验"}
+            </p>
           </div>
         )}
         {page === "courses" &&
@@ -368,7 +382,13 @@ export function OfflineApp() {
             </section>
           </>
         )}
-        {page === "ai" && <ChatPage controller={chatController} transport={aiTransport} contexts={aiContexts} />}
+        {page === "ai" && (
+          <ChatPage
+            controller={chatController}
+            transport={aiTransport}
+            contexts={aiContexts}
+          />
+        )}
         {page === "settings" && (
           <>
             <section className="panel settings">
@@ -396,7 +416,9 @@ export function OfflineApp() {
                 <option value="light">浅色</option>
                 <option value="dark">深色</option>
               </select>
-              <button className="secondary" onClick={() => navigate("ai")}>AI 助手与 Agnes API 配置</button>
+              <button className="secondary" onClick={() => navigate("ai")}>
+                AI 助手与 Agnes API 配置
+              </button>
             </section>
             <section className="panel limitations">
               <h2>当前未支持</h2>
@@ -404,7 +426,8 @@ export function OfflineApp() {
                 校园登录、真实同步、连接服务、作业提交、文件导入与阅读及消息推送。
               </p>
               <p>
-                AI 助手需你在手机配置对应区域的新 Agnes API Key 并主动同意发送。密钥不写入 APK 或 CI。
+                AI 助手需你在手机配置对应区域的新 Agnes API Key
+                并主动同意发送。密钥不写入 APK 或 CI。
               </p>
               <p>
                 此 APK 不运行 Python 后端。手机的 localhost

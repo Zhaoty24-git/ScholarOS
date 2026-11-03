@@ -104,6 +104,11 @@ APK 检查包名/版本/入口/SDK/签名/ZIP/资源/CSP/许可、桥日志配�
 
 构建 run、完整提交、文件大小、APK SHA-256 和 Artifact 以本次最终交付报告为准。
 本文件初始提交不宣称 APK 或模拟器已通过；本地 Mock 成功不代表真实 Agnes 已连通。
+首轮实际云端构建 [41642477865](https://github.com/Zhaoty24-git/ScholarOS/actions/runs/41642477865)
+对应 `1eed1a32bad98f6cfaf98199b7348116d08ebc6b`，Success：18 项模拟器测试无失败/错误/跳过，
+包含 Keystore、真实回环 Mock 服务及原生桥多轮/SSE/取消/UI 检查；设备日志未发现合成凭据。
+同提交离线 CI [41642477752](https://github.com/Zhaoty24-git/ScholarOS/actions/runs/41642477752)
+的 Python 与前端 job 均成功。后续整理提交的最终产物以交付报告和其对应 Artifact 为准。
 
 ## 手机验收与限制
 

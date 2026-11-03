@@ -22,9 +22,12 @@ public class AgnesNativeTest {
         AgnesCredentials reloaded = new AgnesCredentials(InstrumentationRegistry.getInstrumentation().getTargetContext());
         assertTrue(Arrays.equals(reloaded.read(), AgnesTestSupport.key().getBytes(StandardCharsets.UTF_8)));
         assertEquals("agnes-cn", reloaded.provider());
+        java.security.KeyStore keystore = java.security.KeyStore.getInstance("AndroidKeyStore"); keystore.load(null);
+        assertNull(keystore.getKey(AgnesCredentials.ALIAS, null).getEncoded());
     }
     @Test public void keystoreDeleteAndMemoryOnlyMode() throws Exception {
         store.save(AgnesTestSupport.key(), true, "agnes-cn"); store.clear(); assertFalse(store.configured());
+        java.security.KeyStore keystore = java.security.KeyStore.getInstance("AndroidKeyStore"); keystore.load(null); assertFalse(keystore.containsAlias(AgnesCredentials.ALIAS));
         assertThrows(IllegalStateException.class, () -> store.read());
         store.save(AgnesTestSupport.key(), false, "agnes-international");
         assertFalse(store.persistent()); assertEquals("agnes-international", store.provider());
