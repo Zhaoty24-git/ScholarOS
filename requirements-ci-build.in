@@ -1,0 +1,4 @@
+# Explicit build tools for jieba's hash-verified sdist. Install before the app
+# lock with --no-build-isolation, avoiding unpinned PEP517 build downloads.
+setuptools==78.1.0
+wheel==0.45.1

@@ -172,6 +172,7 @@ def build_learn_candidates(
     prefer_course_files: bool,
 ) -> list[dict]:
     candidates: list[dict] = []
+    seen_urls: set[tuple[str, str]] = set()
     for record_index, record in enumerate(records):
         if not isinstance(record, dict) or not is_learn_record(record):
             continue
@@ -198,8 +199,9 @@ def build_learn_candidates(
             url = resolve_download_url(str(attachment.get("download_url") or ""), base_url)
             if not url or not is_http_url(url):
                 continue
-            if not should_keep_document(name, url):
+            if not should_keep_document(name, url) or (record_raw_id, url) in seen_urls:
                 continue
+            seen_urls.add((record_raw_id, url))
             candidates.append(
                 {
                     "record_raw_id": record_raw_id,

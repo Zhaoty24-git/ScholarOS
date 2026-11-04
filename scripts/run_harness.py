@@ -58,7 +58,7 @@ def iter_files(*roots: str) -> list[Path]:
         if path.is_file():
             files.append(path)
         elif path.exists():
-            files.extend(item for item in path.rglob("*") if item.is_file())
+            files.extend(item for item in path.rglob("*") if item.is_file() and (not item.name.startswith(".env") or item.name == ".env.example"))
     return files
 
 

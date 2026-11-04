@@ -127,12 +127,15 @@ def sync_channel(channel: str, args: argparse.Namespace) -> SyncResult:
     else:
         raise ValueError(f"unsupported channel: {channel}")
 
-    if channel == "learn":
-        fresh = records
-        fresh_count = upsert_jsonl_by_raw_id(fresh, output_path)
-    else:
-        fresh = filter_new_records(records, store)
-        fresh_count = write_jsonl(fresh, output_path)
+    # Publish idempotently before advancing either fingerprints or the cursor.
+    # A retry after an interrupted DB update can safely replay the same raw IDs.
+    fresh_count = upsert_jsonl_by_raw_id(records, output_path)
+    filter_new_records(records, store)
+    if channel == "mail":
+        last_uid = store.get_int_state("mail", "last_uid", default=0)
+        max_uid = max((p.metadata.get("uid", 0) for p in raw_payloads if isinstance(p.metadata.get("uid"), int)), default=last_uid)
+        if max_uid > last_uid:
+            store.set_state("mail", "last_uid", max_uid)
     return SyncResult(
         channel=channel,
         raw_count=len(raw_payloads),
@@ -187,7 +190,6 @@ def sync_mail(args: argparse.Namespace, store: DeduplicationStore) -> tuple[list
 
     parser = MailMimeParser()
     records: list[PipelineRecord] = []
-    max_uid = last_uid
     for payload in raw_payloads:
         parsed_records = parser.parse(payload.content, payload.metadata)
         records.extend(
@@ -195,11 +197,7 @@ def sync_mail(args: argparse.Namespace, store: DeduplicationStore) -> tuple[list
             for record in parsed_records
             if looks_course_related(f"{record.title}\n{record.content}\n{record.course_name}")
         )
-        uid = payload.metadata.get("uid")
-        if isinstance(uid, int):
-            max_uid = max(max_uid, uid)
-    if max_uid > last_uid:
-        store.set_state("mail", "last_uid", max_uid)
+    # Cursor commit belongs to sync_channel, after durable output publication.
     return raw_payloads, records
 
 
@@ -261,12 +259,14 @@ def sync_learn_business(
     if not isinstance(courses, list):
         raise ValueError("Learn course list response missing resultList")
 
+    seen_course_ids: set[str] = set()
     for course in courses:
         if not isinstance(course, dict):
             continue
         course_id = as_optional_str(course.get("wlkcid")) or as_optional_str(course.get("id"))
-        if not course_id:
+        if not course_id or course_id in seen_course_ids:
             continue
+        seen_course_ids.add(course_id)
         course_name = as_optional_str(course.get("kcm")) or as_optional_str(course.get("ywkcm")) or "Unknown Course"
         for spec in default_learn_business_specs(course_id):
             payload, payload_data = fetch_learn_json(

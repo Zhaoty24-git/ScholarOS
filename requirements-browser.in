@@ -1,0 +1,2 @@
+# Browser fixture driver only; Chromium/Chrome comes from the runner image.
+websockets==17.4

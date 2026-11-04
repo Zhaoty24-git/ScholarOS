@@ -6,15 +6,16 @@ from pathlib import Path
 import unittest
 from unittest.mock import patch
 
-import test_security as fixtures
+from tests import support as fixtures
+from tests.support import OfflineCase, OfflineEnvironment, import_app
+import_app()
 from backend.app import security, env_manager
 from src.security import private_write
 from src import attachment_security as downloads
 import socket
 
 
-class ReviewApiTests(unittest.TestCase):
-    setUp = fixtures.ApiSecurityTests.setUp
+class ReviewApiTests(OfflineCase):
 
     def test_explicit_trusted_dev_origin_can_cross_local_host_names(self):
         # localhost:5173 -> 127.0.0.1:8000 is cross-site in real browsers.
@@ -89,6 +90,10 @@ class ReviewApiTests(unittest.TestCase):
 
 
 class ReviewAsyncTests(unittest.IsolatedAsyncioTestCase):
+    async def asyncSetUp(self):
+        self.sandbox = self.enterContext(OfflineEnvironment())
+        self.root = self.sandbox.root
+
     async def test_body_replay_and_handler_failure_release_capacity(self):
         received = []
         async def app(scope, receive, send):
@@ -142,7 +147,7 @@ class ReviewAsyncTests(unittest.IsolatedAsyncioTestCase):
             security._MUTATIONS.release()
 
 
-class ReviewTransportTests(unittest.TestCase):
+class ReviewTransportTests(OfflineCase):
     def test_real_local_tls_preserves_sni_host_and_scoped_cookie(self):
         # Synthetic TLS endpoint only: no backend deployment or campus request.
         import http.server
@@ -159,7 +164,7 @@ class ReviewTransportTests(unittest.TestCase):
                 self.end_headers()
                 self.wfile.write(b"synthetic TLS")
             def log_message(self, *args): pass
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             cert, key = root / "cert.pem", root / "key.pem"
             subprocess.run(["openssl", "req", "-x509", "-newkey", "rsa:2048", "-nodes", "-keyout", str(key), "-out", str(cert), "-days", "1", "-subj", "/CN=" + downloads.LEARN_HOST, "-addext", "subjectAltName=DNS:" + downloads.LEARN_HOST], check=True, capture_output=True)
@@ -168,6 +173,7 @@ class ReviewTransportTests(unittest.TestCase):
             context.load_cert_chain(cert, key)
             context.set_servername_callback(lambda sock, name, ctx: names.append(name))
             server.socket = context.wrap_socket(server.socket, server_side=True)
+            self.sandbox.ports.add(server.server_port)
             thread = threading.Thread(target=server.serve_forever, daemon=True)
             thread.start()
             try:
@@ -215,14 +221,14 @@ class ReviewTransportTests(unittest.TestCase):
         session.trust_env = False  # test configuration, no real network
         session.proxies = {"https": "http://synthetic-proxy.invalid:8080"}
         with patch.object(downloads.socket, "getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]), patch.object(downloads._PinnedHTTPSAdapter, "send") as send:
-            with fixtures.tempfile.TemporaryDirectory() as directory:
+            with fixtures.tempfile.TemporaryDirectory(dir=self.root) as directory:
                 with self.assertRaises(downloads.DownloadError):
                     downloads.download_attachment(session, "https://learn.tsinghua.edu.cn/a", Path(directory), "a.pdf")
                 self.assertFalse(list(Path(directory).iterdir()))
             send.assert_not_called()
 
 
-class ReviewAuthenticationTests(unittest.TestCase):
+class ReviewAuthenticationTests(OfflineCase):
     def test_matched_pin_only_tests_process_boundary_not_login_success(self):
         import hashlib
         from unittest.mock import Mock

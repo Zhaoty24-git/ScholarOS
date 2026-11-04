@@ -178,7 +178,7 @@ def upsert_jsonl_by_raw_id(records: Iterable[PipelineRecord], output_path: str |
     existing_keys = {_record_key(item) for item in existing}
     merged = _merge_records_by_raw_id([*existing, *incoming])
     _write_jsonl_dicts(path, merged)
-    return sum(1 for record in incoming if _record_key(record) not in existing_keys)
+    return len({_record_key(record) for record in incoming} - existing_keys)
 
 
 def compact_jsonl_by_raw_id(output_path: str | Path) -> int:
@@ -229,12 +229,8 @@ def _read_jsonl_dicts(path: Path) -> list[dict[str, Any]]:
 
 
 def _write_jsonl_dicts(path: Path, records: list[dict[str, Any]]) -> None:
-    tmp_path = path.with_suffix(path.suffix + ".tmp")
-    with tmp_path.open("w", encoding="utf-8") as stream:
-        for record in records:
-            stream.write(json.dumps(record, ensure_ascii=False, separators=(",", ":")))
-            stream.write("\n")
-    tmp_path.replace(path)
+    from src.security import private_write
+    private_write(path, "".join(json.dumps(record, ensure_ascii=False, separators=(",", ":")) + "\n" for record in records))
 
 
 def _merge_records_by_raw_id(records: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -260,7 +256,12 @@ def _record_key(record: dict[str, Any]) -> tuple[str, str]:
 
 
 def _better_record(left: dict[str, Any], right: dict[str, Any]) -> dict[str, Any]:
-    return right if _record_quality(right) >= _record_quality(left) else left
+    best = dict(right if _record_quality(right) >= _record_quality(left) else left)
+    # Richer historical text must not freeze mutable upstream workflow fields.
+    for key in ("status", "completed", "ddl"):
+        if right.get(key) is not None:
+            best[key] = right[key]
+    return best
 
 
 def _record_quality(record: dict[str, Any]) -> tuple[int, int, int, int, str]:

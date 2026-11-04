@@ -11,6 +11,8 @@
 
 ## 快速开始
 
+无需真实账号的自动化测试与 CI 安装、运行及安全边界见 [离线测试说明](docs/ci-offline-tests.md)。
+
 安全加固版本启动前必须配置本地 API 访问令牌，并重新构建前端。
 配置、兼容性变化和真实校园登录的阻断项见 [安全说明](docs/security-pr1.md)。
 本版本后端服务 `frontend/dist/` 构建产物，不再服务旧 `frontend_static/`。

@@ -17,10 +17,8 @@ import tempfile
 import unittest
 from unittest.mock import Mock, patch
 
-# Import the app with dotenv disabled and an empty environment. All later file
-# and settings requests use a private temporary root, never the checkout data.
-with patch.dict(os.environ, {}, clear=True), patch("dotenv.load_dotenv"):
-    from backend.app import main as api
+from tests.support import OfflineCase, import_app, TOKEN, AUTH
+api = import_app()
 from fastapi.testclient import TestClient
 from backend.app import env_manager
 from backend.app.settings import BackendSettings
@@ -32,23 +30,10 @@ from src.adapters.learn_adapter import encrypt_password_with_node_sm2
 from src.adapters.base_adapter import AdapterError, RawPayload
 from scripts.export_attachments import safe_filename, build_learn_target_name, resolve_download_url
 
-TOKEN = "".join(["synthetic-access-", "x" * 40])
 SYNTHETIC = "synthetic"
-AUTH = {"Authorization": "Bearer " + TOKEN}
 
 
-class ApiSecurityTests(unittest.TestCase):
-    def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
-        self.addCleanup(self.tmp.cleanup)
-        self.root = Path(self.tmp.name)
-        config = BackendSettings(project_root=self.root)
-        self.enterContext(patch.dict(os.environ, {"SCHOLAROS_API_TOKEN": TOKEN}, clear=True))
-        self.enterContext(patch.object(env_manager, "settings", config))
-        self.enterContext(patch.object(api, "settings", config))
-        self.enterContext(patch("requests.sessions.Session.request", side_effect=AssertionError("Network forbidden")))
-        self.client = TestClient(api.app, base_url="http://localhost")
-
+class ApiSecurityTests(OfflineCase):
     def test_all_sensitive_routes_require_auth(self):
         for route in api.app.routes:
             path = getattr(route, "path", "")
@@ -225,9 +210,10 @@ class ApiSecurityTests(unittest.TestCase):
         self.assertEqual(self.client.post("/api/sync/run", headers=AUTH, json={}).status_code, 200)
 
 
-class DownloadTests(unittest.TestCase):
+class DownloadTests(OfflineCase):
     def setUp(self):
-        self.tmp = tempfile.TemporaryDirectory()
+        super().setUp()
+        self.tmp = tempfile.TemporaryDirectory(dir=self.root)
         self.addCleanup(self.tmp.cleanup)
         self.root = Path(self.tmp.name)
         self.enterContext(patch.object(downloads.socket, "getaddrinfo", return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("8.8.8.8", 443))]))
@@ -318,7 +304,7 @@ class DownloadTests(unittest.TestCase):
             self.assertNotIn("\\", filename)
 
 
-class CredentialAndHygieneTests(unittest.TestCase):
+class CredentialAndHygieneTests(OfflineCase):
     def test_auth_destinations_are_fixed_https_hosts(self):
         for url in ["https://id.tsinghua.edu.cn/f/login", "https://auth.cic.tsinghua.edu.cn/f/login"]:
             self.assertEqual(validate_auth_url(url), url)
@@ -348,7 +334,7 @@ class CredentialAndHygieneTests(unittest.TestCase):
     def test_scoped_session_roundtrip_and_legacy_refusal(self):
         import requests
         from scripts import probe_learn_double_auth as probe
-        with tempfile.TemporaryDirectory() as directory, patch.object(probe, "SESSION_PATH", Path(directory) / "session.json"):
+        with tempfile.TemporaryDirectory(dir=self.root) as directory, patch.object(probe, "SESSION_PATH", Path(directory) / "session.json"):
             session = requests.Session()
             session.cookies.set("synthetic", SYNTHETIC, domain="id.tsinghua.edu.cn", path="/b")
             probe.save_session(session, auth_url="https://id.tsinghua.edu.cn/f/login", auth_html="synthetic")
@@ -366,7 +352,7 @@ class CredentialAndHygieneTests(unittest.TestCase):
         import requests
         from src.adapters.jwch_adapter import JwchAdapter
         from src.adapters.base_adapter import AdapterConfig
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             path = Path(directory) / "cookies.json"
             config = AdapterConfig(source="jwch", extra={"info_cookie_path": str(path)})
             adapter = JwchAdapter(config, session=requests.Session())
@@ -392,7 +378,7 @@ class CredentialAndHygieneTests(unittest.TestCase):
             run.assert_not_called()
 
     def test_private_session_file_and_symlink(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             root = Path(directory)
             private_write(root / "session.json", "synthetic")
             self.assertEqual((root / "session.json").stat().st_mode & 0o777, 0o600)
@@ -401,7 +387,7 @@ class CredentialAndHygieneTests(unittest.TestCase):
             self.assertEqual((root / "session.json").read_text(), "synthetic")
 
     def test_failed_atomic_write_preserves_original(self):
-        with tempfile.TemporaryDirectory() as directory:
+        with tempfile.TemporaryDirectory(dir=self.root) as directory:
             target = Path(directory) / "private.json"
             private_write(target, "original")
             with patch("src.security.os.replace", side_effect=OSError("synthetic")):
