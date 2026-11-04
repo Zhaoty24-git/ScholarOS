@@ -1,0 +1,96 @@
+name: ScholarOS Android Debug
+
+on:
+  push:
+    branches: [codex/android-offline-apk-pr3]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: android-debug-${{ github.ref }}
+  cancel-in-progress: true
+
+defaults:
+  run:
+    shell: bash
+
+jobs:
+  android:
+    name: Offline APK and emulator acceptance
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    env:
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
+      - name: Private Gradle home without shared caches
+        run: echo "GRADLE_USER_HOME=$RUNNER_TEMP/scholaros-gradle" >> "$GITHUB_ENV"
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
+        with:
+          node-version: '24.19.0'
+          package-manager-cache: false
+      - uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6.1.0
+        with:
+          distribution: temurin
+          java-version: '21.0.13+9'
+      - name: Build isolated offline frontend
+        run: |
+          node scripts/frontend_ci.mjs --android --output "$RUNNER_TEMP/scholaros-android-dist"
+          test ! -e frontend/dist-android
+          cp -R "$RUNNER_TEMP/scholaros-android-dist" frontend/dist-android
+      - name: Install locked Capacitor CLI and sync native assets
+        working-directory: frontend
+        run: |
+          npm ci --ignore-scripts --no-audit --no-fund
+          node node_modules/@capacitor/cli/bin/capacitor sync android
+      - name: Verify wrapper and install fixed Android SDK
+        run: |
+          echo '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  frontend/android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
+          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
+          java -version
+          node --version
+          git rev-parse HEAD
+      - name: Assemble real Debug APK and instrumentation APK
+        run: python3 scripts/run_android_gradle.py build
+      - name: Inspect package, signature, assets and checksum
+        run: python3 scripts/verify_android_apk.py --apk frontend/android/app/build/outputs/apk/debug/app-debug.apk --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/scholaros-apk"
+      - name: Enable KVM for this ephemeral runner user
+        run: |
+          test -c /dev/kvm
+          sudo setfacl -m "u:$(id -un):rw" /dev/kvm
+      - name: Emulator install, airplane mode and offline UI acceptance
+        uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
+        with:
+          api-level: '35'
+          target: google_apis
+          arch: x86_64
+          force-avd-creation: true
+          disable-animations: true
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim -camera-back none
+          script: |
+            adb shell settings put global airplane_mode_on 1
+            adb shell svc wifi disable
+            adb shell svc data disable
+            python3 scripts/run_android_gradle.py device
+      - name: Check all emulator tests passed without skips
+        run: python3 scripts/check_android_test_results.py frontend/android/app/build/outputs/androidTest-results/connected
+      - name: Upload verified test APK and manifest
+        id: apk
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
+        with:
+          name: ScholarOS-debug-${{ github.sha }}
+          path: ${{ runner.temp }}/scholaros-apk/
+          if-no-files-found: error
+          retention-days: 14
+          compression-level: 0
+      - name: Record real artifact download location
+        env:
+          APK_ARTIFACT_URL: ${{ steps.apk.outputs.artifact-url }}
+        run: |
+          echo "::notice title=APK artifact::$APK_ARTIFACT_URL"
+          cat "$RUNNER_TEMP/scholaros-apk/apk-manifest.json" >> "$GITHUB_STEP_SUMMARY"

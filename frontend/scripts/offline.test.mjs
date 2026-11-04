@@ -1,0 +1,54 @@
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  courses,
+  makeDemo,
+  deadlineState,
+  formatDeadline,
+  safeRoute,
+} from "../src/offline/model.ts";
+const now = new Date("2026-11-03T12:00:00Z");
+test("required synthetic courses have unique IDs", () => {
+  assert.equal(new Set(courses.map((c) => c.id)).size, 3);
+  for (const title of ["电力系统分析", "电力电子技术基础", "自动控制原理"])
+    assert.ok(courses.some((c) => c.name === title));
+});
+test("all assignments and notices resolve to a synthetic course", () => {
+  for (const item of [...makeDemo(now).assignments, ...makeDemo(now).notices])
+    assert.ok(courses.some((c) => c.id === item.courseId));
+});
+test("fixtures include long list, submitted and unsubmitted records", () => {
+  const a = makeDemo(now).assignments;
+  assert.ok(a.length > 20);
+  assert.equal(new Set(a.map((t) => t.id)).size, a.length);
+  assert.ok(a.some((t) => t.submitted));
+  assert.ok(a.some((t) => !t.submitted));
+});
+test("missing deadline remains explicit", () =>
+  assert.equal(deadlineState(null, now).kind, "unknown"));
+test("malformed deadline remains explicit without crashing", () =>
+  assert.equal(formatDeadline("2026-invalid-date"), "截止时间格式异常"));
+test("invalid timezone is rejected", () =>
+  assert.equal(
+    deadlineState("2026-11-03T12:00:00+99:00", now).kind,
+    "unknown",
+  ));
+test("past deadline is overdue", () =>
+  assert.equal(deadlineState("2026-11-02T12:00:00Z", now).kind, "overdue"));
+test("offsets refer to the same instant", () =>
+  assert.deepEqual(
+    deadlineState("2026-11-03T23:00:00+08:00", now),
+    deadlineState("2026-11-03T15:00:00Z", now),
+  ));
+test("date-only values are not silently treated as timestamps", () =>
+  assert.equal(deadlineState("2026-11-04", now).kind, "unknown"));
+test("routes reject unknown pages and injected input", () => {
+  assert.equal(safeRoute("#/courses/power"), "courses/power");
+  for (const h of [
+    "#javascript:alert(1)",
+    "#//evil.invalid",
+    "#settings/../../env",
+    "#unknown",
+  ])
+    assert.equal(safeRoute(h), "home");
+});

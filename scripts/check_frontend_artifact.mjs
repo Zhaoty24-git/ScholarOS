@@ -14,7 +14,7 @@ export async function publishArtifact(source, output, checkout) {
   }
 }
 
-export async function verifyArtifact(directory, canary = "") {
+export async function verifyArtifact(directory, canary = "", base = "/app/") {
   const root = resolve(directory);
   const files = [];
   async function visit(dir) {
@@ -39,7 +39,7 @@ export async function verifyArtifact(directory, canary = "") {
   const references = [...html.matchAll(/(?:src|href)=["']([^"']+)["']/g)].map((m) => m[1]).filter((v) => !v.startsWith("data:"));
   if (!references.some((v) => v.endsWith(".js")) || !references.some((v) => v.endsWith(".css"))) throw new Error("Missing compiled scripts/styles");
   for (const value of references) {
-    if (!value.startsWith("/app/assets/") || value.includes("..") || !files.some((f) => "/app/" + f.path === value)) throw new Error("Missing or external asset reference");
+    if (!value.startsWith(base + "assets/") || value.includes("..") || !files.some((f) => base + f.path === value)) throw new Error("Missing or external asset reference");
   }
   if (files.reduce((sum, f) => sum + f.bytes, 0) > 20 * 1024 * 1024) throw new Error("Artifact unexpectedly large");
   return files.sort((a, b) => a.path.localeCompare(b.path));

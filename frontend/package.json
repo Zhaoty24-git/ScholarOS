@@ -7,9 +7,14 @@
     "test:security": "node scripts/security-api.test.mjs",
     "dev": "vite --host 0.0.0.0 --port 5173",
     "build": "tsc && vite build",
-    "preview": "vite preview --host 0.0.0.0 --port 4173"
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "build:android": "tsc && vite build --config vite.android.config.ts",
+    "test:offline": "node scripts/offline.test.mjs"
   },
   "dependencies": {
+    "@capacitor/android": "8.6.0",
+    "@capacitor/app": "8.1.2",
+    "@capacitor/core": "8.6.0",
     "@vitejs/plugin-react": "latest",
     "react": "latest",
     "react-dom": "latest",
@@ -17,6 +22,7 @@
     "vite": "latest"
   },
   "devDependencies": {
+    "@capacitor/cli": "8.6.0",
     "@types/react": "^19.2.15",
     "@types/react-dom": "^19.2.3"
   }

@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+    <item name="colorPrimary">#123A3B</item>
+    <item name="colorPrimaryDark">#102B35</item>
+    <item name="colorAccent">#2C725B</item>
+  </style>
+  <style name="AppTheme.NoActionBar" parent="AppTheme">
+    <item name="windowActionBar">false</item>
+    <item name="windowNoTitle">true</item>
+  </style>
+  <style name="AppTheme.NoActionBarLaunch" parent="Theme.SplashScreen">
+    <item name="windowSplashScreenBackground">#123A3B</item>
+    <item name="windowSplashScreenAnimatedIcon">@drawable/ic_scholaros</item>
+    <item name="postSplashScreenTheme">@style/AppTheme.NoActionBar</item>
+  </style>
+</resources>

@@ -503,6 +503,8 @@ python scripts\probe_jwch.py --allow-network --target schedule --parse --anchor-
 
 它们已经通过 `.gitignore` 忽略。建议通过 Git 提交代码，而不是把整个工作目录打包发给协作者，因为打包可能包含本地忽略文件。
 
+Android 离线测试版的工程、构建与手机安装方式见 [Android Debug 说明](docs/android-offline-debug.md)。
+
 ## 当前限制
 
 - 网络学堂中少数作业的详情页本身没有文字说明，此时 `content` 会为空，前端会提示查看附件或课程通知。
