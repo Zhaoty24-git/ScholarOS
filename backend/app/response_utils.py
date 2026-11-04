@@ -54,7 +54,7 @@ def safe_call(
                 {
                     "error_code": "module_exception",
                     "user_message": user_message,
-                    "detail": str(exc),
+                    "detail": type(exc).__name__,
                     "retryable": True,
                 }
             ],

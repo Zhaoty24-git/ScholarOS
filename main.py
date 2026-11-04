@@ -89,8 +89,8 @@ def main() -> int:
         try:
             result = run_with_retries(channel, args)
         except Exception as exc:
-            logging.exception("channel sync failed: channel=%s error=%s", channel, type(exc).__name__)
-            print(f"[FAIL] {channel}: {type(exc).__name__}: {str(exc)[:160]}")
+            logging.error("channel sync failed: channel=%s error=%s", channel, type(exc).__name__)
+            print(f"[FAIL] {channel}: {type(exc).__name__}")
             failures.append(channel)
             continue
         print(
@@ -472,11 +472,9 @@ def fetch_learn_json(
 
     if stripped.startswith("<") or "text/html" in content_type.lower():
         logging.error(
-            "learn_non_json_response endpoint=%s status=%s url=%s preview=%s",
+            "learn_non_json_response endpoint=%s status=%s",
             endpoint,
             metadata.get("status_code"),
-            final_url,
-            preview,
         )
         if "login_timeout" in final_url.lower():
             raise AdapterError(
@@ -489,21 +487,19 @@ def fetch_learn_json(
                 "Check LEARN_USERNAME/LEARN_PASSWORD or trust-device requirements."
             )
         raise AdapterError(
-            f"learn_adapter endpoint returned HTML instead of JSON: endpoint={endpoint} preview={preview[:120]}"
+            f"learn_adapter endpoint returned HTML instead of JSON: endpoint={endpoint}"
         )
 
     try:
         data = json.loads(text)
     except json.JSONDecodeError as exc:
         logging.error(
-            "learn_json_decode_failed endpoint=%s status=%s url=%s preview=%s",
+            "learn_json_decode_failed endpoint=%s status=%s",
             endpoint,
             metadata.get("status_code"),
-            final_url,
-            preview,
         )
         raise AdapterError(
-            f"learn_adapter endpoint returned non-JSON response: endpoint={endpoint} preview={preview[:120]}"
+            f"learn_adapter endpoint returned non-JSON response: endpoint={endpoint}"
         ) from exc
 
     if not isinstance(data, dict):

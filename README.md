@@ -11,6 +11,10 @@
 
 ## 快速开始
 
+安全加固版本启动前必须配置本地 API 访问令牌，并重新构建前端。
+配置、兼容性变化和真实校园登录的阻断项见 [安全说明](docs/security-pr1.md)。
+本版本后端服务 `frontend/dist/` 构建产物，不再服务旧 `frontend_static/`。
+
 在仓库根目录安装依赖并启动应用：
 
 ```powershell
@@ -284,7 +288,7 @@ python scripts\export_attachments.py --source mail --limit 50
 
 ## 启动应用
 
-前端生产资源已放在 `frontend_static/`。启动后端即可同时访问 API 和页面：
+前端生产资源由 `cd frontend && npm run build` 生成到 `frontend/dist/`。配置访问令牌并完成构建后，启动后端即可同时访问 API 和页面：
 
 ```powershell
 python -m uvicorn backend.app.main:app --host 127.0.0.1 --port 8000

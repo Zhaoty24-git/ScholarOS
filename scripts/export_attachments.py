@@ -19,6 +19,7 @@ if str(ROOT) not in sys.path:
 from src.adapters.learn_adapter import LearnAdapter
 from src.adapters.mail_adapter import MailAdapter
 from src.env_loader import load_project_env
+from src.attachment_security import download_attachment, validate_download_url, DownloadError, MAX_DOWNLOAD_BYTES
 
 
 DOCUMENT_EXTENSIONS = {".pdf", ".ppt", ".pptx", ".doc", ".docx", ".xls", ".xlsx", ".zip", ".rar"}
@@ -136,21 +137,19 @@ def export_learn_attachments(
         for candidate in candidates:
             if exported >= limit:
                 return exported
-            response = adapter._session.get(candidate["url"], headers=adapter._request_headers(), timeout=30)
-            response.raise_for_status()
-            filename = safe_filename(
-                filename_from_response(response.headers.get("Content-Disposition")) or candidate["attachment_name"]
+            filename = safe_filename(candidate["attachment_name"])
+            target, bytes_written, content_type = download_attachment(
+                adapter._session, candidate["url"], output_dir,
+                build_learn_target_name(candidate, filename), headers=adapter._request_headers(),
             )
-            target = unique_path(output_dir / build_learn_target_name(candidate, filename))
-            target.write_bytes(response.content)
             write_manifest(
                 manifest,
                 source="learn",
                 record_raw_id=candidate["record_raw_id"],
                 attachment_name=candidate["attachment_name"],
                 local_path=target,
-                bytes_written=len(response.content),
-                content_type=response.headers.get("Content-Type", "").split(";")[0],
+                bytes_written=bytes_written,
+                content_type=content_type,
                 course_name=candidate.get("course_name"),
                 task_type=candidate.get("task_type"),
                 title=candidate.get("title"),
@@ -292,8 +291,12 @@ def export_mail_attachments(
                 body = part.get_payload(decode=True)
                 if not body:
                     continue
+                if len(body) > MAX_DOWNLOAD_BYTES:
+                    raise DownloadError("Mail attachment exceeds download limit")
                 target = unique_path(output_dir / f"{safe_filename(payload.raw_id)}_{safe_filename(filename)}")
-                target.write_bytes(body)
+                # Exclusive creation refuses a racing file/symlink.
+                with target.open("xb") as stream:
+                    stream.write(body)
                 write_manifest(
                     manifest,
                     source="mail",
@@ -330,9 +333,15 @@ def resolve_download_url(url: str, base_url: str) -> str:
     if not url:
         return ""
     if is_http_url(url):
-        return url
+        try:
+            return validate_download_url(url)
+        except DownloadError:
+            return ""
     if url.startswith("/"):
-        return urljoin(base_url.rstrip("/") + "/", url.lstrip("/"))
+        try:
+            return validate_download_url(urljoin(base_url.rstrip("/") + "/", url))
+        except DownloadError:
+            return ""
     return ""
 
 
@@ -352,17 +361,18 @@ def safe_filename(value: object) -> str:
     text = str(value or "attachment")
     text = re.sub(r'[<>:"/\\|?*\x00-\x1f]+', "_", text)
     text = re.sub(r"\s+", " ", text).strip()
+    text = text.strip(". ")
     return text[:120] or "attachment"
 
 
 def unique_path(path: Path) -> Path:
-    if not path.exists():
+    if not path.exists() and not path.is_symlink():
         return path
     stem = path.stem
     suffix = path.suffix
     for index in range(2, 10000):
         candidate = path.with_name(f"{stem}_{index}{suffix}")
-        if not candidate.exists():
+        if not candidate.exists() and not candidate.is_symlink():
             return candidate
     raise RuntimeError(f"Could not allocate unique path for {path}")
 
@@ -420,4 +430,9 @@ def write_manifest(
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    try:
+        raise SystemExit(main())
+    except Exception as exc:
+        # Authentication/HTTP tracebacks can contain cookies or ticket URLs.
+        print(f"Attachment export failed: {type(exc).__name__}", file=sys.stderr)
+        raise SystemExit(1) from None

@@ -24,7 +24,7 @@ def load_project_env(path: str | Path = ".env") -> str | None:
     last_error: UnicodeDecodeError | None = None
     for encoding in ("utf-8", "utf-8-sig", "gbk", "cp936"):
         try:
-            load_dotenv(env_path, encoding=encoding)
+            load_dotenv(env_path, encoding=encoding, interpolate=False)
             return encoding
         except UnicodeDecodeError as exc:
             last_error = exc

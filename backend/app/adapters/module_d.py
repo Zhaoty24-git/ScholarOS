@@ -226,7 +226,7 @@ def _blocked_payload(exc: Exception, *, retrieved: dict[str, Any] | None = None,
         "error_code": error["error_code"],
         "user_message": error["user_message"],
         "retryable": error["retryable"],
-        "errors": [{**error, "detail": str(exc)}],
+        "errors": [{**error, "detail": type(exc).__name__}],
         "warnings": [],
     }
     if retrieved is not None:
@@ -250,7 +250,7 @@ def _llm_chat(messages: list[dict[str, str]], temperature: float = 0.5) -> dict[
     try:
         return _extract_json(raw)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"模型返回格式异常：{exc}") from exc
+        raise RuntimeError(f"模型返回格式异常：{type(exc).__name__}") from exc
 
 # ---------------------------------------------------------------------------
 # A-module data loaders (D 调用 A 模块)

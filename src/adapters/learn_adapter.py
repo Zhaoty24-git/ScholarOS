@@ -5,11 +5,15 @@ from __future__ import annotations
 import re
 import json
 import subprocess
+import os
+import hashlib
+import hmac
 from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 from urllib.parse import urljoin
 
+from src.security import validate_auth_url
 from .base_adapter import AdapterConfig, AdapterError, BaseAdapter, RawPayload
 
 
@@ -212,14 +216,15 @@ class LearnAdapter(BaseAdapter):
         payload[username_field] = self.require("username")
         payload[password_field] = self._prepare_password(form_page_url, form_page_html)
         payload.update(load_trusted_device_fields(self.config.extra.get("trust_path")))
-        submit_url = urljoin(form_page_url, str(action))
+        submit_url = validate_auth_url(urljoin(form_page_url, str(action)))
+        if method != "post":
+            raise AdapterError("Credential submission requires POST")
 
         try:
-            if method == "get":
-                result = self._session.get(submit_url, params=payload, timeout=timeout)
-            else:
-                result = self._session.post(submit_url, data=payload, timeout=timeout)
+            result = self._session.post(submit_url, data=payload, timeout=timeout, allow_redirects=False)
             result.raise_for_status()
+            if 300 <= result.status_code < 400:
+                raise AdapterError("Authentication redirect requires review")
         except Exception as exc:
             raise AdapterError("learn_adapter login submit failed") from exc
 
@@ -255,14 +260,16 @@ class LearnAdapter(BaseAdapter):
         return response.url, response.text
 
     def _prepare_password(self, form_page_url: str, form_page_html: str) -> str:
+        validate_auth_url(form_page_url)
         public_key = extract_sm2_public_key(form_page_html)
         if not public_key:
-            return self.require("password")
+            raise AdapterError("Unencrypted credential submission refused")
 
         sm2_url = discover_sm2_script_url(form_page_url, form_page_html)
         if not sm2_url:
             raise AdapterError("learn_adapter login failed: SM2 script URL missing")
 
+        validate_auth_url(sm2_url)
         timeout = float(self.config.extra.get("timeout_seconds", 20))
         try:
             sm2_response = self._session.get(sm2_url, timeout=timeout)
@@ -344,6 +351,12 @@ def discover_learn_roaming_url(current_url: str, html: str) -> str | None:
 def encrypt_password_with_node_sm2(*, password: str, public_key: str, sm2_javascript: str) -> str:
     """Run the official page SM2 helper in Node without exposing secrets in argv."""
 
+    # Executing a fetched script with credentials is unsafe unless its exact
+    # bytes were reviewed and pinned by the operator. No auto-trust on first use.
+    digest = os.getenv("SCHOLAROS_SM2_SHA256", "")
+    actual = hashlib.sha256(sm2_javascript.encode("utf-8")).hexdigest()
+    if not re.fullmatch(r"[0-9a-f]{64}", digest) or not hmac.compare_digest(digest, actual):
+        raise AdapterError("SM2 helper is not reviewed/pinned; authentication blocked")
     node_code = """
 const fs = require('fs');
 const input = JSON.parse(fs.readFileSync(0, 'utf8'));
@@ -354,6 +367,7 @@ process.stdout.write(encrypted);
     try:
         completed = subprocess.run(
             ["node", "-e", node_code],
+            env={"PATH": os.environ.get("PATH", os.defpath)},
             input=json.dumps(
                 {
                     "password": password,
