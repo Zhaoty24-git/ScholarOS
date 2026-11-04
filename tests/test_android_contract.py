@@ -12,6 +12,21 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class AndroidContractTests(unittest.TestCase):
+    def test_ai_allows_only_explicit_network_permission(self):
+        tree = 'E: uses-permission (line=1)\n A: android:name="android.permission.INTERNET"'
+        self.assertEqual(verify_permissions(tree, network=True), ["android.permission.INTERNET"])
+        with self.assertRaises(ValueError): verify_permissions(tree + '\nE: uses-permission\n A: android:name="android.permission.CAMERA"', network=True)
+
+    def test_private_permission_declaration_requires_exact_name(self):
+        name = "com.scholaros.app.DYNAMIC_RECEIVER_NOT_EXPORTED_PERMISSION"
+        tree = 'E: permission\n A: android:name="' + name + '_other"\n A: android:protectionLevel=(type 0x11)0x2\nE: uses-permission\n A: android:name="' + name + '"'
+        with self.assertRaises(ValueError): verify_permissions(tree)
+
+    def test_credential_logging_and_generic_http_disabled(self):
+        c = json.loads((ROOT / "frontend/capacitor.config.json").read_text())
+        self.assertEqual(c["loggingBehavior"], "none")
+        self.assertFalse(c["plugins"]["CapacitorHttp"]["enabled"])
+
     def test_compiled_sdk_attributes_decoded(self):
         tree = 'A: android:minSdkVersion(0x0101020c)=(type 0x10)0x18\nA: android:targetSdkVersion(0x01010270)=(type 0x10)0x24'
         self.assertEqual(verify_sdk(tree), {"minSdkVersion": 24, "targetSdkVersion": 36})
@@ -52,10 +67,10 @@ class AndroidContractTests(unittest.TestCase):
         tree += '\nE: uses-permission (line=21)\n  A: android:name="' + name + '"'
         with self.assertRaises(ValueError): verify_permissions(tree)
 
-    def test_manifest_has_no_permissions_and_real_launcher(self):
+    def test_manifest_has_only_required_ai_network_permission_and_real_launcher(self):
         manifest = ET.parse(ROOT / "frontend/android/app/src/main/AndroidManifest.xml").getroot()
-        self.assertEqual(manifest.findall("uses-permission"), [])
         a = "{http://schemas.android.com/apk/res/android}"
+        self.assertEqual([p.get(a + "name") for p in manifest.findall("uses-permission")], ["android.permission.INTERNET"])
         app = manifest.find("application")
         self.assertEqual(app.get(a + "allowBackup"), "false")
         self.assertEqual(app.get(a + "usesCleartextTraffic"), "false")
@@ -100,6 +115,6 @@ class AndroidContractTests(unittest.TestCase):
 
     def test_real_named_passing_emulator_results_accepted(self):
         with tempfile.TemporaryDirectory() as tmp:
-            names = ["launchWithoutNetworkOrCredentials", "courseDetailAndNativeBack", "assignmentDetailsAndLongList", "noticesMaterialsSettingsAndRotation"]
-            (Path(tmp) / "TEST-example.xml").write_text('<testsuite tests="4" failures="0" errors="0" skipped="0">' + ''.join('<testcase name="' + n + '" />' for n in names) + '</testsuite>')
-            self.assertEqual(check(tmp)["tests"], 4)
+            names = ['launchWithoutNetworkOrCredentials', 'courseDetailAndNativeBack', 'assignmentDetailsAndLongList', 'noticesMaterialsSettingsAndRotation', 'aiMultiTurnContextMarkdownAndKeyDeletion', 'aiStreamingCancelAndSafeErrors', 'keystoreEncryptedPersistenceAndReload', 'keystoreDeleteAndMemoryOnlyMode', 'replacementInvalidatesPreviousKeyMaterial', 'malformedKeyAndProviderRejected', 'tamperedRegionCannotDecryptKey', 'modelRolesAndBothRegionPaths', 'rejectsInjectedRolesAndMalformedResponse', 'realLocalMockServiceRoundtrip', 'unauthorizedRateLimitServerAndRedirectAreSanitized', 'timeoutsAndTlsErrorsNeverFallback', 'streamingChunksAndIncompleteStreamValidation', 'cancellationAndDownloadLimit']
+            (Path(tmp) / "TEST-example.xml").write_text('<testsuite tests="'+str(len(names))+'" failures="0" errors="0" skipped="0">' + ''.join('<testcase name="' + n + '" />' for n in names) + '</testsuite>')
+            self.assertEqual(check(tmp)["tests"], 18)

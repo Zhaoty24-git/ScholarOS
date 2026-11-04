@@ -2,7 +2,7 @@ name: ScholarOS Android Debug
 
 on:
   push:
-    branches: [codex/android-offline-apk-pr3]
+    branches: [codex/android-offline-apk-pr3, codex/agnes-ai-pr4]
   pull_request:
   workflow_dispatch:
 
@@ -39,16 +39,19 @@ jobs:
           distribution: temurin
           java-version: '21.0.13+9'
       - name: Build isolated offline frontend
+        timeout-minutes: 5
         run: |
           node scripts/frontend_ci.mjs --android --output "$RUNNER_TEMP/scholaros-android-dist"
           test ! -e frontend/dist-android
           cp -R "$RUNNER_TEMP/scholaros-android-dist" frontend/dist-android
       - name: Install locked Capacitor CLI and sync native assets
+        timeout-minutes: 5
         working-directory: frontend
         run: |
           npm ci --ignore-scripts --no-audit --no-fund
           node node_modules/@capacitor/cli/bin/capacitor sync android
       - name: Verify wrapper and install fixed Android SDK
+        timeout-minutes: 5
         run: |
           echo '7d3a4ac4de1c32b59bc6a4eb8ecb8e612ccd0cf1ae1e99f66902da64df296172  frontend/android/gradle/wrapper/gradle-wrapper.jar' | sha256sum --check
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" 'platforms;android-36' 'build-tools;36.0.0'
@@ -56,14 +59,17 @@ jobs:
           node --version
           git rev-parse HEAD
       - name: Assemble real Debug APK and instrumentation APK
+        timeout-minutes: 10
         run: python3 scripts/run_android_gradle.py build
       - name: Inspect package, signature, assets and checksum
+        timeout-minutes: 2
         run: python3 scripts/verify_android_apk.py --apk frontend/android/app/build/outputs/apk/debug/app-debug.apk --commit "$GITHUB_SHA" --output "$RUNNER_TEMP/scholaros-apk"
       - name: Enable KVM for this ephemeral runner user
         run: |
           test -c /dev/kvm
           sudo setfacl -m "u:$(id -un):rw" /dev/kvm
       - name: Emulator install, airplane mode and offline UI acceptance
+        timeout-minutes: 15
         uses: ReactiveCircus/android-emulator-runner@a421e43855164a8197daf9d8d40fe71c6996bb0d # v2.38.0
         with:
           api-level: '35'
@@ -76,7 +82,10 @@ jobs:
             adb shell settings put global airplane_mode_on 1
             adb shell svc wifi disable
             adb shell svc data disable
+            adb logcat -c
             python3 scripts/run_android_gradle.py device
+            adb logcat -d > "$RUNNER_TEMP/scholaros-device.log"
+            python3 scripts/check_android_logs.py "$RUNNER_TEMP/scholaros-device.log"
       - name: Check all emulator tests passed without skips
         run: python3 scripts/check_android_test_results.py frontend/android/app/build/outputs/androidTest-results/connected
       - name: Upload verified test APK and manifest

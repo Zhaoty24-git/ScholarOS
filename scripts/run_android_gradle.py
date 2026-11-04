@@ -5,7 +5,7 @@ import subprocess
 import sys
 
 # Build and exercise our app, rather than the dependency libraries' own test APKs.
-TASKS = {"build": [":app:assembleDebug", ":app:assembleDebugAndroidTest"], "device": [":app:connectedDebugAndroidTest"]}
+TASKS = {"build": [":app:assembleDebug", ":app:assembleDebugAndroidTest"], "device": [":app:connectedDebugAndroidTest", "-Pandroid.testInstrumentationRunnerArguments.scholarosSynthetic=true"]}
 if __name__ == "__main__":
     tasks = TASKS[sys.argv[1]]
     root = Path(__file__).resolve().parents[1] / "frontend/android"

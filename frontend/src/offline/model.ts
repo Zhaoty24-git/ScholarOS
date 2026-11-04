@@ -22,7 +22,7 @@ export type Notice = {
   date: string;
   body: string;
 };
-export const VERSION = "0.1.0-dev";
+export const VERSION = "0.2.0-dev";
 export const courses: Course[] = [
   {
     id: "power",
@@ -175,11 +175,12 @@ export const navigation = [
   ["assignments", "作业"],
   ["notices", "通知"],
   ["materials", "资料"],
+  ["ai", "AI 助手"],
   ["settings", "设置"],
 ] as const;
 export function safeRoute(hash: string) {
   const value = hash.replace(/^#\/?/, "");
-  return /^(home|courses|assignments|notices|materials|settings)(\/[a-z0-9-]+)?$/.test(
+  return /^(home|courses|assignments|notices|materials|ai|settings)(\/[a-z0-9-]+)?$/.test(
     value,
   )
     ? value

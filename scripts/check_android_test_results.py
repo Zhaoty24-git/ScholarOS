@@ -14,7 +14,12 @@ def check(directory):
         for key in totals: totals[key] += int(root.attrib.get(key, 0))
         for case in root.findall("testcase"): names.add(case.attrib.get("name"))
     expected = {"launchWithoutNetworkOrCredentials", "courseDetailAndNativeBack", "assignmentDetailsAndLongList", "noticesMaterialsSettingsAndRotation"}
-    if not expected <= names or totals["tests"] < 4 or any(totals[k] for k in ("failures", "errors", "skipped")):
+    # PR4 must preserve the four offline cases and also run native vault/protocol
+    # and real bridge/UI Mock cases; zero/skipped AI acceptance cannot be green.
+    ai_expected = {"keystoreEncryptedPersistenceAndReload", "keystoreDeleteAndMemoryOnlyMode", "replacementInvalidatesPreviousKeyMaterial", "malformedKeyAndProviderRejected", "modelRolesAndBothRegionPaths", "rejectsInjectedRolesAndMalformedResponse", "realLocalMockServiceRoundtrip", "unauthorizedRateLimitServerAndRedirectAreSanitized", "timeoutsAndTlsErrorsNeverFallback", "streamingChunksAndIncompleteStreamValidation", "cancellationAndDownloadLimit", "aiMultiTurnContextMarkdownAndKeyDeletion", "aiStreamingCancelAndSafeErrors"}
+    expected |= ai_expected
+    expected.add("tamperedRegionCannotDecryptKey")
+    if not expected <= names or totals["tests"] < len(expected) or any(totals[k] for k in ("failures", "errors", "skipped")):
         raise ValueError("Incomplete or failing emulator acceptance: " + str(totals))
     return totals
 
